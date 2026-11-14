@@ -2,6 +2,10 @@
 
 Jogo de surf em 3D numa baía ao pôr do sol. Ande pela praia, pegue a prancha, reme até o pico e surfe ondas que abrem em tubo, fecham tudo ou quebram na beira.
 
+## Jogar no navegador
+
+**[heitorcoser.github.io/mare-dourada](https://heitorcoser.github.io/mare-dourada/)** — funciona no PC e no celular.
+
 ## Baixar e jogar (Windows)
 
 1. Vá em **[Releases](../../releases/latest)** e baixe `MareDourada-win64.exe`.
