@@ -58,6 +58,13 @@ canvas#c{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
 .sheet input[type=text]{font:600 16px var(--body);padding:9px 12px;border-radius:10px;border:1px solid rgba(251,246,236,.28);background:rgba(251,246,236,.08);color:var(--foam);min-width:0;width:100%;box-sizing:border-box}
 .mplabel{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--sand)}
 .mplist{margin:0;padding-left:18px;font-size:14px;line-height:1.6}
+#boardBody{display:flex;flex-direction:column;gap:16px}
+#boardBody section{display:flex;flex-direction:column;gap:8px}
+.chlist{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.chlist li{display:flex;flex-direction:column;gap:1px;padding:7px 10px;border-radius:10px;background:rgba(251,246,236,.06);font-size:13px}
+.chlist li span{opacity:.75;font-size:12px}
+.chlist li.ok b{color:var(--sea)}
+.chips button:disabled{opacity:.45;cursor:not-allowed}
 .mpstatus{margin:0;font-size:13.5px;color:#ffd166}
 #net.off{color:var(--sand);opacity:.8;letter-spacing:.06em;text-transform:none;font-weight:600}
 #players{display:flex;flex-direction:column;gap:3px;min-width:190px;max-width:260px;font-size:13px}
@@ -142,6 +149,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div class="stat now"><span class="k">Onda</span><span class="v" id="sNow">0</span></div>
     <div class="stat"><span class="k">Total</span><span class="v" id="sTotal">0</span></div>
     <div class="stat"><span class="k">Melhor</span><span class="v" id="sBest">0</span></div>
+    <div class="stat"><span class="k">Bateria</span><span class="v" id="sHeat">0,00</span></div>
   </div>
 
   <div id="right" class="hud">
@@ -155,6 +163,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
       <button id="bSound" type="button">Som: ligado (M)</button>
       <button id="bHelp" type="button">Ajuda (H)</button>
       <button id="bSet" type="button">Ajustes (O)</button>
+      <button id="bBoard" type="button">Prancha (B)</button>
       <button id="bMp" type="button" hidden>Multiplayer (P)</button>
     </div>
   </div>
@@ -170,6 +179,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div>Na vaca: <kbd>W</kbd> nada para cima</div>
     <div>Surfando: <kbd>A</kbd>/<kbd>D</kbd> cavar, <kbd>W</kbd> bombear</div>
     <div><kbd>Espaço</kbd> subindo a parede = aéreo, gire com <kbd>A</kbd>/<kbd>D</kbd></div>
+    <div><kbd>B</kbd> prancha, pinturas e desafios</div>
     <div><kbd>R</kbd> voltar para a areia</div>
   </div>
 
@@ -182,6 +192,14 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div id="stick"><div id="knob"></div></div>
     <button class="tbtn" id="tAct" type="button">Prancha</button>
     <button class="tbtn" id="tJump" type="button">Pular</button>
+  </div>
+
+  <div id="boardSheet" class="sheet" hidden role="dialog" aria-labelledby="boardTitle">
+    <div class="sheet-head">
+      <h2 id="boardTitle">Prancha e desafios</h2>
+      <button id="boardClose" type="button" aria-label="Fechar prancha e desafios">Fechar</button>
+    </div>
+    <div id="boardBody"></div>
   </div>
 
   <div id="mp" class="sheet" hidden role="dialog" aria-labelledby="mpTitle">
@@ -288,7 +306,7 @@ function terrainH(x, z) {
 }
 /* ---------- Ajustes salvos ---------- */
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
-const CFG = { quality: IS_TOUCH ? 'medio' : 'alto', beach: 'farol', waveSize: 1.0, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true, types: null };
+const CFG = { quality: IS_TOUCH ? 'medio' : 'alto', board: 'short', paint: 'classica', beach: 'farol', waveSize: 1.0, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true, types: null };
 try { Object.assign(CFG, JSON.parse(localStorage.getItem('mare-dourada-cfg') || '{}')); } catch (e) { }
 function saveCfg() { try { localStorage.setItem('mare-dourada-cfg', JSON.stringify(CFG)); } catch (e) { } }
 const QUAL = {
@@ -1198,11 +1216,13 @@ for (let i = 0; i < 7; i++) {
 /* ---------- Prancha e personagem ---------- */
 function makeBoard() {
   const g = new THREE.Group();
-  const deck = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 12), new THREE.MeshStandardMaterial({ color: 0xfdf3df, roughness: 0.45 }));
+  const mats = { deck: new THREE.MeshStandardMaterial({ color: 0xfdf3df, roughness: 0.45 }), stripe: new THREE.MeshStandardMaterial({ color: 0xff7a59, roughness: 0.45 }), rail: new THREE.MeshStandardMaterial({ color: 0x2fa894, roughness: 0.5 }) };
+  g.userData.mats = mats;
+  const deck = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 12), mats.deck);
   deck.scale.set(0.29, 0.045, 1.06); deck.castShadow = true; g.add(deck);
-  const stripe = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 8), new THREE.MeshStandardMaterial({ color: 0xff7a59, roughness: 0.45 }));
+  const stripe = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 8), mats.stripe);
   stripe.scale.set(0.05, 0.047, 1.0); g.add(stripe);
-  const rail = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 8), new THREE.MeshStandardMaterial({ color: 0x2fa894, roughness: 0.5 }));
+  const rail = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 8), mats.rail);
   rail.scale.set(0.295, 0.03, 1.065); rail.position.y = -0.012; g.add(rail);
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, 0.16), M(0x23394a)); fin.position.set(0, -0.09, -0.85); g.add(fin);
   return g;
@@ -1245,7 +1265,34 @@ function makeChar(shortsCol = 0xff6f4f, shorts2Col = 0xffd166) {
   return root;
 }
 
+/* ---------- Pranchas ----------
+   Cada prancha muda a física: tamanho (rema mais rápido e pega onda mais cedo), quanto vira, velocidade máxima e o
+   quanto aguenta erro na curva. Onda grande exige mais velocidade na remada para entrar (a parede anda mais rápido que
+   você), então no Canhão a Gun faz diferença, como no mar de verdade. */
+const BOARDS = {
+  short: { name: 'Pranchinha', desc: 'curva fechada e manobras rápidas, para ondas normais', len: 1.0, wid: 1.0, paddle: 1.0, catchV: 2.6, turn: 1.0, vmax: 18, tol: 1.0, moveK: 1.0 },
+  long:  { name: 'Long', desc: 'rema rápido e pega até marola; curva aberta; dá para andar no bico', len: 1.5, wid: 1.12, paddle: 1.3, catchV: 1.9, turn: 0.68, vmax: 15, tol: 1.25, moveK: 0.8 },
+  gun:   { name: 'Gun', desc: 'prancha de onda grande: rema forte, é estável e corre muito', len: 1.32, wid: 0.95, paddle: 1.38, catchV: 2.3, turn: 0.78, vmax: 23, tol: 1.4, moveK: 0.9 }
+};
+// pinturas: liberadas pelos desafios (need = quantos desafios cumpridos)
+const PAINTS = [
+  { k: 'classica', name: 'Clássica', deck: 0xfdf3df, stripe: 0xff7a59, rail: 0x2fa894, need: 0 },
+  { k: 'piscina', name: 'Piscina', deck: 0xe8fbff, stripe: 0x2fd0bc, rail: 0x3d6fb6, need: 2 },
+  { k: 'sol', name: 'Pôr do sol', deck: 0xffe0b8, stripe: 0xe8506e, rail: 0xff9f1c, need: 4 },
+  { k: 'noite', name: 'Noite', deck: 0x23394a, stripe: 0xffd166, rail: 0x0f2230, need: 6 },
+  { k: 'dourada', name: 'Dourada', deck: 0xffd166, stripe: 0xfdf6e8, rail: 0xc79a62, need: 9 }
+];
+const boardDef = k => BOARDS[k] || BOARDS.short;
+const paintDef = k => PAINTS.find(p => p.k === k) || PAINTS[0];
+function applyBoardLook(g, type, paint) {
+  const B = boardDef(type), P = paintDef(paint), mt = g.userData.mats; if (!mt) return;
+  g.userData.look = type + '|' + paint;
+  g.scale.set(B.wid, 1, B.len);
+  mt.deck.color.set(P.deck); mt.stripe.color.set(P.stripe); mt.rail.color.set(P.rail);
+}
+const curBoard = () => boardDef(CFG.board);
 const board = makeBoard();
+applyBoardLook(board, CFG.board, CFG.paint);
 const hero = makeChar();
 const J = hero.userData.J;
 const rig = new THREE.Group(); scene.add(rig);
@@ -1599,7 +1646,7 @@ function pop(text, sub = '', bad = false) {
   hud.pops.appendChild(d); setTimeout(() => d.remove(), 1800);
   while (hud.pops.children.length > 3) hud.pops.firstChild.remove();
   // os outros jogadores veem as suas manobras e vacas no canto da tela
-  if (/Vaca|Tub|Aéreo|Melhor|Floater|Batida|Cutback|Rasgada|Furou|Drop/.test(text) && typeof netEvent === 'function') netEvent(text, sub, bad);
+  if (/Vaca|Tub|Aéreo|Melhor|Floater|Batida|Cutback|Rasgada|Furou|Drop|Nota|Hang/.test(text) && typeof netEvent === 'function') netEvent(text, sub, bad);
 }
 const fmt = n => Math.round(n).toLocaleString('pt-BR');
 
@@ -1668,6 +1715,99 @@ $('bSound').addEventListener('click', toggleMute);
 $('bHelp').addEventListener('click', () => { $('help').hidden = !$('help').hidden; });
 function toggleMute() { muted = !muted; $('bSound').textContent = 'Som: ' + (muted ? 'desligado' : 'ligado') + ' (M)'; }
 
+/* ---------- Pontos, combo e notas dos juízes ----------
+   Combo: manobra até 2,5 s depois da anterior sobe o multiplicador (×1,25 … ×2). Ao fim de cada onda os juízes dão
+   uma nota de 0 a 10, como num campeonato: pontos da onda, variedade, tubo, tamanho da onda e se você completou.
+   A bateria soma as duas melhores notas. */
+function award(r, name, pts, sub) {
+  r.combo = r.time - (r.lastMove ?? -9) < 2.5 ? Math.min(2, (r.combo || 1) + 0.25) : 1;
+  r.lastMove = r.time;
+  const total = Math.round(pts * r.combo);
+  r.pts += total; r.tricks++;
+  const cb = r.combo > 1 ? ' · combo ×' + String(r.combo).replace('.', ',') : '';
+  pop(name, '+' + fmt(total) + cb + (sub ? ' · ' + sub : ''));
+  return total;
+}
+function judgeScore(r, reason) {
+  const variety = Object.keys(r.moves).length;
+  let s = 10 * (1 - Math.exp(-r.pts / 2600));
+  s += Math.min(0.8, (r.H || 0) / 18) + Math.min(0.6, variety * 0.15) + (r.maxTube > 1 ? Math.min(0.8, r.maxTube * 0.25) : 0);
+  if (reason === 'wipe') s *= 0.45;
+  if (r.time < 3) s *= 0.6;
+  return clamp(Math.round(s * 100) / 100, 0.1, 10);
+}
+const fmtNota = v => v.toFixed(2).replace('.', ',');
+const NOTES = [];
+const heatScore = () => { const t = [...NOTES].sort((a, b) => b - a); return (t[0] || 0) + (t[1] || 0); };
+
+/* ---------- Desafios ---------- */
+const CHALLENGES = [
+  { k: 'onda', name: 'Primeira onda', desc: 'Termine uma onda sem tomar vaca' },
+  { k: 'tubo2', name: 'Lá dentro', desc: 'Fique 2 s dentro do tubo' },
+  { k: 'aereo360', name: 'Giro completo', desc: 'Aterrisse um aéreo de 360°' },
+  { k: 'variedade', name: 'Repertório', desc: 'Faça 4 manobras diferentes na mesma onda' },
+  { k: 'nota8', name: 'Nota alta', desc: 'Tire nota 8 ou mais numa onda' },
+  { k: 'furou5', name: 'Passando a arrebentação', desc: 'Fure 5 ondas com duck dive', goal: 5 },
+  { k: 'gigante', name: 'Gigante', desc: 'Surfe uma onda de 15 m ou mais no Canhão' },
+  { k: 'bico', name: 'Hang ten', desc: 'Ande no bico da Long por 2 s' },
+  { k: 'praias', name: 'Viajante', desc: 'Surfe uma onda em 3 praias diferentes', goal: 3 }
+];
+const PROG = { done: {}, count: {}, beaches: [] };
+try { const p = JSON.parse(localStorage.getItem('mare-dourada-desafios') || '{}'); if (p && typeof p === 'object') { Object.assign(PROG.done, p.done || {}); Object.assign(PROG.count, p.count || {}); if (Array.isArray(p.beaches)) PROG.beaches = p.beaches.filter(b => BEACHES[b]); } } catch (e) { }
+function saveProg() { try { localStorage.setItem('mare-dourada-desafios', JSON.stringify(PROG)); } catch (e) { } }
+const doneCount = () => CHALLENGES.filter(c => PROG.done[c.k]).length;
+function chDone(k) {
+  const c = CHALLENGES.find(x => x.k === k); if (!c || PROG.done[k]) return;
+  const before = doneCount();
+  PROG.done[k] = true; saveProg();
+  setTimeout(() => pop('Desafio cumprido!', c.name), 700);
+  const now = doneCount();
+  for (const p of PAINTS) if (p.need > before && p.need <= now) setTimeout(() => pop('Pintura nova!', p.name + ' · aperte B'), 1500);
+  if (typeof netEvent === 'function') netEvent('Desafio: ' + c.name, '', false);
+  if (!$('boardSheet').hidden) boardRender();
+}
+function chCount(k, n = 1) {
+  const c = CHALLENGES.find(x => x.k === k); if (!c || PROG.done[k]) return;
+  PROG.count[k] = (PROG.count[k] || 0) + n; saveProg();
+  if (PROG.count[k] >= (c.goal || 1)) chDone(k);
+}
+function chBeach(b) {
+  if (!PROG.beaches.includes(b)) { PROG.beaches.push(b); saveProg(); }
+  PROG.count.praias = PROG.beaches.length;
+  if (PROG.beaches.length >= 3) chDone('praias');
+}
+
+/* ---------- Janela da prancha e dos desafios (B) ---------- */
+function boardOpen(open) {
+  const el = $('boardSheet'); el.hidden = open === undefined ? !el.hidden : !open;
+  if (!el.hidden) { boardRender(); if (document.pointerLockElement) document.exitPointerLock(); }
+}
+function boardRender() {
+  const box = $('boardBody'); if (!box) return;
+  box.textContent = '';
+  const sec = (title) => { const s = document.createElement('section'); const h = document.createElement('h3'); h.textContent = title; s.appendChild(h); box.appendChild(s); return s; };
+  const chip = (parent, title, sub, pressed, disabled, fn) => {
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-pressed', String(pressed)); b.disabled = disabled;
+    const t = document.createElement('b'); t.textContent = title; const d = document.createElement('span'); d.textContent = sub; b.append(t, d);
+    b.addEventListener('click', fn); parent.appendChild(b); return b;
+  };
+  const s1 = sec('Prancha'); const g1 = document.createElement('div'); g1.className = 'chips'; s1.appendChild(g1);
+  for (const k of Object.keys(BOARDS)) chip(g1, BOARDS[k].name, BOARDS[k].desc, CFG.board === k, false, () => { CFG.board = k; saveCfg(); applyBoardLook(board, CFG.board, CFG.paint); boardRender(); });
+  const s2 = sec('Pintura'); const g2 = document.createElement('div'); g2.className = 'chips'; s2.appendChild(g2);
+  const n = doneCount();
+  for (const p of PAINTS) chip(g2, p.name, p.need > n ? 'faltam ' + (p.need - n) + ' desafios' : (p.need ? 'liberada' : 'de fábrica'), CFG.paint === p.k, p.need > n, () => { CFG.paint = p.k; saveCfg(); applyBoardLook(board, CFG.board, CFG.paint); boardRender(); });
+  const s3 = sec('Desafios · ' + n + '/' + CHALLENGES.length); const ul = document.createElement('ul'); ul.className = 'chlist'; s3.appendChild(ul);
+  for (const c of CHALLENGES) {
+    const li = document.createElement('li'); if (PROG.done[c.k]) li.className = 'ok';
+    const t = document.createElement('b'); t.textContent = (PROG.done[c.k] ? '✓ ' : '') + c.name;
+    const d = document.createElement('span'); d.textContent = c.desc + (c.goal && !PROG.done[c.k] ? ' (' + Math.min(PROG.count[c.k] || 0, c.goal) + '/' + c.goal + ')' : '');
+    li.append(t, d); ul.appendChild(li);
+  }
+  const s4 = sec('Bateria'); const p4 = document.createElement('p'); p4.className = 'note';
+  p4.textContent = NOTES.length ? 'Notas: ' + NOTES.map(fmtNota).join(' · ') + ' · bateria (2 melhores) = ' + fmtNota(heatScore()) : 'Surfe uma onda para receber a primeira nota dos juízes.';
+  s4.appendChild(p4);
+}
+
 /* ---------- Regras de surf ---------- */
 function nearestWave(x, z) {
   let tw = null, bestF = 1e9;
@@ -1676,6 +1816,10 @@ function nearestWave(x, z) {
 }
 const Q_PRONE = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
 const Q_STANCE = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -Math.PI / 2, 0));
+function newRide() {
+  const tw = nearestWave(S.pos.x, S.pos.z);
+  return { pts: 0, time: 0, tricks: 0, top: 0, moves: {}, combo: 1, lastMove: -9, maxTube: 0, noseT: 0, H: tw ? waveAt(S.pos.x, tw.zc, _lw).h : 0, beach: waveCfg().beach };
+}
 function startRide() {
   // como foi a entrada na onda
   const g = grad(S.pos.x, S.pos.z), gl = Math.hypot(g.gx, g.gz);
@@ -1684,14 +1828,14 @@ function startRide() {
   if (tw) {
     const a = brokenAge(tw, S.pos.x), hl = hollowAt(tw, S.pos.x), front = tw.zc - S.pos.z, Hc = waveAt(S.pos.x, tw.zc, _lw).h;
     if (hl > 0.3 && a > tw.land * 0.15 && a < tw.land + 0.3 && front < Hc * 0.7) {
-      S.ride = { pts: 0, time: 0, tricks: 0, top: 0, moves: {} };
+      S.ride = newRide();
       rig.add(hero); wipeout('desceu junto com o lábio (por cima da bancada)'); return;
     }
     if (gl > 0.75) {
       const dhx = -g.gx / gl, dhz = -g.gz / gl;
       const straight = Math.abs(Math.sin(S.heading) * dhx + Math.cos(S.heading) * dhz);
-      if (straight > 0.92 && S.speed < 3.4) {
-        S.ride = { pts: 0, time: 0, tricks: 0, top: 0, moves: {} };
+      if (straight > 0.92 && S.speed < (CFG.board === 'long' ? 2.4 : 3.4)) {
+        S.ride = newRide();
         rig.add(hero); wipeout('o bico enterrou no drop', 'nose'); return;
       }
       late = true;
@@ -1702,9 +1846,9 @@ function startRide() {
   S.popQ0 = hero.quaternion.clone(); S.popP0 = hero.position.clone();
   const sp = Math.max(6.5, Math.hypot(S.vx, S.vz) + 2.5);
   S.vx = Math.sin(S.heading) * sp; S.vz = Math.cos(S.heading) * sp;
-  S.ride = { pts: 0, time: 0, tricks: 0, top: 0, moves: {} };
+  S.ride = newRide();
   S.carveT = 0; S.lostT = 0; S.tubeT = 0; S.turn = null; S.pumpPh = 0; S.floatT = 0;
-  if (late) { S.ride.pts += 250; S.ride.tricks++; pop('Drop atrasado!', '+250'); }
+  if (late) award(S.ride, 'Drop atrasado!', 250);
   else pop('Dropou!');
   splashSound(0.5);
 }
@@ -1715,6 +1859,12 @@ function endRide(reason) {
   if (reason === 'wipe') pts *= 0.5;
   pts = Math.round(pts);
   S.total += pts;
+  if (r.time > 1) {
+    const nota = judgeScore(r, reason); NOTES.push(nota); if (NOTES.length > 40) NOTES.shift();
+    setTimeout(() => pop('Nota ' + fmtNota(nota), reason === 'wipe' ? 'a vaca derrubou a nota' : 'bateria ' + fmtNota(heatScore())), 400);
+    if (nota >= 8) chDone('nota8');
+    if (reason !== 'wipe' && r.time > 2 && pts > 0) { chDone('onda'); chBeach(r.beach || 'farol'); }
+  }
   if (pts > S.best) { S.best = pts; try { localStorage.setItem('mare-dourada-best', String(pts)); } catch (e) { } if (pts > 200) pop('Melhor onda!', fmt(pts) + ' pontos'); }
   else if (reason !== 'wipe') pop('+' + fmt(pts), reason === 'shore' ? 'até a beira' : reason === 'kick' ? 'saiu da onda' : 'a onda passou');
   S.ride = null;
@@ -1845,7 +1995,8 @@ function step(dt) {
   if (take('KeyR')) respawn();
   if (take('KeyO')) openSettings();
   if (take('KeyP') && !$('bMp').hidden) mpOpen();
-  if (take('Escape')) { openSettings(false); mpOpen(false); }
+  if (take('KeyB')) boardOpen();
+  if (take('Escape')) { openSettings(false); mpOpen(false); boardOpen(false); }
   if (S.mode !== 'ride') S.tubeCam = lerp(S.tubeCam || 0, 0, 1 - Math.exp(-3 * dt));
   if (lastCrash > 0.6) shakeT = Math.max(shakeT, clamp(lastCrash - 0.6, 0, 1) * 0.3);
   const ax = axisX(), ay = axisY();
@@ -1926,8 +2077,9 @@ function step(dt) {
       pitch = 0.65 * smooth(0, 0.12, d.t) * (1 - smooth(0.3, 0.55, d.t)) - 1.8 * up * (1 - up);
     }
     S.heading += -ax * 1.9 * dt * (d ? 0.35 : 1);
-    if (!d) { if (ay > 0) S.speed += 3.2 * ay * dt; else if (ay < 0) S.speed += 2.5 * ay * dt; }
-    S.speed -= S.speed * (d ? 0.3 : 0.75) * dt; S.speed = clamp(S.speed, -1, 5.4);
+    const BD = curBoard();
+    if (!d) { if (ay > 0) S.speed += 3.2 * BD.paddle * ay * dt; else if (ay < 0) S.speed += 2.5 * ay * dt; }
+    S.speed -= S.speed * (d ? 0.3 : 0.75) * dt; S.speed = clamp(S.speed, -1, 5.4 * BD.paddle);
     const g = grad(S.pos.x, S.pos.z); const fo = waveAt(S.pos.x, S.pos.z).foam;
     const shield = 1 - 0.85 * prot;
     S.wx += -g.gx * 7 * dt * shield; S.wz += (-g.gz * 7 - fo * 8) * dt * shield;
@@ -1954,7 +2106,7 @@ function step(dt) {
       if (dd > 0.2 && Math.random() < dt * 30) { emitFoam(S.pos.x + rs(0.6), S.pos.z + rs(0.6), 0, 0, 1, 0.5, 1.2); }
       if (d.rel && d.t > d.rel + 0.5) {
         S.duck = null; S.duckCool = 0.3;
-        if (d.absorbed > 0.6) { pop('Furou a onda!'); S.speed = Math.max(S.speed, 2.4); }
+        if (d.absorbed > 0.6) { pop('Furou a onda!'); chCount('furou5'); S.speed = Math.max(S.speed, 2.4); }
         emit(S.pos.x + fx * 1.2, h + 0.1, S.pos.z + fz * 1.2, fx * 1.5, 2, fz * 1.5, 12, 0.8);
       }
     }
@@ -1962,10 +2114,15 @@ function step(dt) {
 
     const toShore = -(S.vz) > 2.0;
     const onFace = g.gz > 0.12;
-    const canCatch = !d && onFace && toShore && Math.hypot(S.vx, S.vz) > 2.6;
-    S.canCatch = canCatch;
-    // lábio caindo em cima de quem está remando (no ponto de impacto): sem duck dive, é vaca
+    // onda grande anda mais rápido que você: precisa de mais velocidade na remada para entrar (prancha maior ajuda)
     const tw0 = nearestWave(S.pos.x, S.pos.z);
+    const Hn = tw0 ? waveAt(S.pos.x, tw0.zc, _lw).h : 0;
+    const needV = BD.catchV + Math.max(0, Hn - 8) * 0.12;
+    const fastEnough = Math.hypot(S.vx, S.vz) > needV;
+    const canCatch = !d && onFace && toShore && fastEnough;
+    S.canCatch = canCatch;
+    const tooSlowBig = !d && onFace && toShore && !fastEnough && Hn > 8;
+    // lábio caindo em cima de quem está remando (no ponto de impacto): sem duck dive, é vaca
     let lipIncoming = false, foamEta = 99;
     for (const w of W) {
       const fr = w.zc - S.pos.z, aw = brokenAge(w, S.pos.x);
@@ -1983,10 +2140,11 @@ function step(dt) {
     if (S.mode !== 'paddle') { /* tomou a vaca agora */ }
     else if (d) (hud.wave.textContent = '', setHint(d.rel ? 'Subindo do outro lado…' : 'Furando a onda… segure <b>ESPAÇO</b> embaixo · fôlego ' + Math.max(0, d.max - d.t).toFixed(1).replace('.', ',') + ' s'));
     else if (canCatch) { setHint(g.gz > 0.75 ? 'Drop atrasado! <b>ESPAÇO</b> e vire de lado para não enterrar o bico' : '<b>ESPAÇO</b> ficar de pé!'); if (jump) { startRide(); } }
-    else if (jump && S.duckCool <= 0 && depth > 1.0) {
+    else if (jump && S.duckCool <= 0 && depth > 1.0 && !toShore && !tooSlowBig) {   // duck dive só remando para o fundo
       S.duck = { t: 0, D: 0.8 + 0.5 * clamp(S.speed / 4, 0, 1), max: 1.8, rel: 0, absorbed: 0 };
       emit(S.pos.x + fx, h + 0.1, S.pos.z + fz, 0, 2.2, 0, 14, 0.7); splashSound(0.35);
     }
+    else if (tooSlowBig) setHint('Onda grande: reme mais forte (<b>W</b>)' + (CFG.board === 'short' ? ' ou troque para a <b>Gun</b> (B)' : ''));
     else if ((foamEta < 1.6 || lipIncoming) && depth > 1.0 && S.vz > -1) setHint((lipIncoming ? 'O lábio vai cair aí!' : 'Espuma chegando!') + ' <b>ESPAÇO</b> na hora certa para furar (duck dive)');
     else {
       let nextEta = 99, nw = null;
@@ -2020,7 +2178,8 @@ function step(dt) {
     const fFace = clamp(hNow / Hc, 0, 1.2);              // 0 = base, 1 = crista
     let sp = Math.hypot(S.vx, S.vz);
     // virar: quanto mais rápido, mais aberta a curva
-    const turnRate = popping ? 0 : (2.7 - clamp(sp / 22, 0, 0.9));
+    const BR = curBoard();
+    const turnRate = popping ? 0 : (2.7 - clamp(sp / 22, 0, 0.9)) * BR.turn;
     const dHead = -ax * turnRate * dt;
     S.heading += dHead;
     const tr = Math.abs(dHead) / dt;
@@ -2030,7 +2189,7 @@ function step(dt) {
     const vhx = S.vx / (sp || 1), vhz = S.vz / (sp || 1);
     const down = -(vhx * g.gx + vhz * g.gz);             // > 0 descendo a parede
     // bombear: comprimir e estender só rende na descida; pular à toa no plano freia
-    if (ay > 0 && !popping) {
+    if (ay > 0 && !popping && CFG.board !== 'long') {   // na Long, W anda até o bico (ela quase não bombeia)
       S.pumpPh += dt * 8.5;
       const beat = Math.max(0, Math.sin(S.pumpPh));
       if (down > 0.04 && gl > 0.08) sp += 5.0 * Math.min(down * 2.5, 1) * beat * dt;
@@ -2049,7 +2208,7 @@ function step(dt) {
     if (fFace < 0.35 && tr > 1.1 && sp > 6.5 && gl > 0.1) sp += 0.9 * tr * dt;
     // atrito; S estola (segura no tubo); embaixo e sem parede a prancha morre
     sp -= (0.17 * sp + 0.009 * sp * sp + (ay < 0 ? 5.5 : 0) + (fFace < 0.12 && gl < 0.06 ? 1.6 : 0)) * dt;
-    sp = clamp(sp, 0, 18);
+    sp = clamp(sp, 0, BR.vmax);
     S.vx = Math.sin(nAng) * sp; S.vz = Math.cos(nAng) * sp;
     if (Math.abs(ax) < 0.1) S.heading += angDiff(nAng, S.heading) * (1 - Math.exp(-2 * dt));
     S.pos.x = clamp(S.pos.x + S.vx * dt, -150, 150); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 235);
@@ -2064,6 +2223,13 @@ function step(dt) {
       hero.quaternion.copy(S.popQ0).slerp(Q_STANCE, k);
       hero.position.set(lerp(S.popP0.x, 0, k), lerp(S.popP0.y, 0.04, k) + Math.sin(k * Math.PI) * 0.25, lerp(S.popP0.z, 0.05, k));
     } else if (r.time < POP + 0.1) { hero.quaternion.copy(Q_STANCE); hero.position.set(0, 0.04, 0.05); }
+    // Long: segurando W o surfista caminha até o bico ("hang ten"); na parede, o peso no bico faz a prancha correr
+    const nosing = CFG.board === 'long' && !popping && ay > 0 && sp > 4 && fFace > 0.2;
+    S.noseK = lerp(S.noseK || 0, nosing ? 1 : 0, 1 - Math.exp(-2.5 * dt));
+    if (!popping && r.time >= POP + 0.1) hero.position.z = 0.05 + 0.62 * (S.noseK || 0);
+    if (nosing && S.noseK > 0.5) { sp = Math.min(sp + 1.6 * dt, BR.vmax); S.vx = Math.sin(nAng) * sp; S.vz = Math.cos(nAng) * sp; }
+    if (nosing && S.noseK > 0.8) { r.noseT += dt; if (r.noseT >= 2 && !r.hangTen) { r.hangTen = true; award(r, 'Hang ten', 350, 'no bico'); chDone('bico'); } } else if (!nosing) r.noseT = 0;
+    if (!r.giant && !popping && r.beach === 'canhao' && (r.H || 0) >= 15 && r.time > 3) { r.giant = true; chDone('gigante'); }
     // pontos de linha
     r.pts += sp * dt * 5;
     r.top = Math.max(r.top, sp);
@@ -2088,8 +2254,8 @@ function step(dt) {
           const rep = r.moves[name] = (r.moves[name] || 0) + 1;
           const varF = Math.pow(0.6, rep - 1);                               // juiz premia variedade
           const pts = Math.round(base * clamp(t.sp0 / 10, 0.6, 1.5) * clamp(t.acc / 1.6, 0.7, 1.4) * varF);
-          r.pts += pts; r.tricks++;
-          pop(name, '+' + fmt(pts) + (rep > 1 ? ' · repetida' : ''));
+          award(r, name, pts * curBoard().moveK, rep > 1 ? 'repetida' : '');
+          if (Object.keys(r.moves).length >= 4) chDone('variedade');
           const n = 18 + t.acc * t.sp0 * 1.2;
           emit(S.pos.x - fx * 0.6, h + 0.2, S.pos.z - fz * 0.6, -fx * 2 + -Math.cos(S.heading) * 3, 3 + t.sp0 * 0.25, -fz * 2 + Math.sin(S.heading) * 3, n, 1.4);
           emitMist(S.pos.x, h + 1, S.pos.z, -fx, 0.6, -fz, 2, 1, 1.4);
@@ -2099,7 +2265,7 @@ function step(dt) {
     // floater: deslizar por cima da espuma na crista
     if (tw && a > ld && fFace > 0.75 && wfm > 0.45 && Math.abs(S.vx) > 6.5) {
       S.floatT += dt;
-      if (S.floatT > 0.7 && !r.floated) { r.floated = true; r.pts += 320; r.tricks++; pop('Floater', '+320'); }
+      if (S.floatT > 0.7 && !r.floated) { r.floated = true; award(r, 'Floater', 320); }
     } else { S.floatT = 0; if (fFace < 0.4) r.floated = false; }
     // spray de rabeta
     if (sp > 6) emit(S.pos.x - fx * 0.9, h + 0.1, S.pos.z - fz * 0.9, -fx * 1.5, 1.4, -fz * 1.5, 1.5, 0.5);
@@ -2111,6 +2277,7 @@ function step(dt) {
     tgt.spX = 0.22 + crouch * 0.25; tgt.spY = -ax * 0.35; tgt.spZ = 0;
     tgt.hdY = 0.95; tgt.hdX = -0.15;
     tgt.shLz = 1.15 + ax * 0.3; tgt.shRz = -1.0 + ax * 0.3; tgt.shLx = -0.25; tgt.shRx = 0.2; tgt.elL = -0.35; tgt.elR = -0.5;
+    if ((S.noseK || 0) > 0.3) { const k = S.noseK; tgt.shLz = lerp(tgt.shLz, 1.5, k); tgt.shRz = lerp(tgt.shRz, -1.5, k); tgt.hpLx *= 1 - 0.6 * k; tgt.knL *= 1 - 0.6 * k; tgt.hpRx *= 1 - 0.6 * k; tgt.knR *= 1 - 0.6 * k; tgt.spX *= 1 - 0.5 * k; }
     if (S.tubeCam > 0.3) { tgt.shRz = -0.3; tgt.shRx = 0.6; tgt.elR = -0.2; }   // mão na parede dentro do tubo
     standHips(tgt);
     if (popping) { tgt.hipsY = lerp(0.95, tgt.hipsY, r.time / POP); }
@@ -2135,12 +2302,12 @@ function step(dt) {
     const closing = !covered && tw && tw.close > 0.5 && a > -1.2 && a < ld * 0.25 && front < Hc * 1.4;
     S.tubeCam = lerp(S.tubeCam || 0, covered ? 1 : 0, 1 - Math.exp(-3 * dt));
     if (covered) {
-      S.tubeT += dt;
+      S.tubeT += dt; r.maxTube = Math.max(r.maxTube || 0, S.tubeT);
       const deep = clamp(front / (Hc * 1.2), 0, 1);
       r.pts += sp * dt * (10 + 10 * deep);
       shakeT = Math.max(shakeT, 0.18); if (Math.random() < dt * 3) dropsT = Math.max(dropsT, 0.7);
     } else if (S.tubeT > 0 && !crashed) {
-      if (S.tubeT > 0.5) { const b = Math.round(400 + S.tubeT * 450); r.pts += b; r.tricks++; pop(S.tubeT > 2.5 ? 'Tubaço!' : 'Tubo!', S.tubeT.toFixed(1).replace('.', ',') + ' s lá dentro · +' + fmt(b)); }
+      if (S.tubeT > 0.5) { const b = Math.round(400 + S.tubeT * 450); award(r, S.tubeT > 2.5 ? 'Tubaço!' : 'Tubo!', b, S.tubeT.toFixed(1).replace('.', ',') + ' s lá dentro'); if (S.tubeT >= 2) chDone('tubo2'); }
       S.tubeT = 0;
     }
     // fim da onda
@@ -2148,7 +2315,7 @@ function step(dt) {
     else if (act && !popping) { endRide('kick'); S.speed = Math.min(sp * 0.4, 4); S.wx = S.wz = 0; enterPaddle(false); }
     else if (depth < 0.55) { endRide('shore'); S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); }
     else if (wfm > 0.85 && sp < 4.2 && !popping && !covered && !inPocket) wipeout('a espuma te engoliu', 'foam');
-    else if (!popping && !covered && Math.abs(diff) > 1.45 && sp < 4.5 && Math.abs(ax) > 0.5) wipeout('a rabeta soltou na curva', 'rail');
+    else if (!popping && !covered && Math.abs(diff) > 1.45 * BR.tol && sp < 4.5 && Math.abs(ax) > 0.5) wipeout('a rabeta soltou na curva', 'rail');
     else if ((g.gz < -0.02 && sp < 4.5) || (h < 0.35 && sp < 2.5)) { S.lostT += dt; if (S.lostT > 0.7) { endRide('lost'); S.speed = sp * 0.5; S.wx = S.wz = 0; enterPaddle(false); } }
     else S.lostT = 0;
     if (S.mode === 'ride') {
@@ -2158,7 +2325,7 @@ function step(dt) {
       else if (sp > 8.5 && climb > 1.2) setHint('<b>ESPAÇO</b> agora para voar!');
       else if (fFace < 0.3 && sp > 6) setHint('Embaixo da onda: vire forte (<b>A/D</b>) para a cavada de base');
       else if (fFace > 0.7) setHint('No topo: vire de volta para a batida, ou siga de lado no trim');
-      else setHint('<b>W</b> bombeia na descida · <b>A/D</b> manobras · <b>S</b> estola · <b>E</b> sai da onda');
+      else setHint((CFG.board === 'long' ? '<b>W</b> anda até o bico' : '<b>W</b> bombeia na descida') + ' · <b>A/D</b> manobras · <b>S</b> estola · <b>E</b> sai da onda');
       setMode(covered ? 'No tubo' : 'Surfando', 'ride');
     }
     focus.set(rig.position.x, rig.position.y + 1.3, rig.position.z);
@@ -2188,8 +2355,8 @@ function step(dt) {
         S.mode = 'ride'; S.heading = S.heading + S.spin + (reverse ? 0 : 0);
         if (reverse) S.heading += Math.PI;
         const sp = Math.hypot(S.vx, S.vz) * 0.92; S.vx = Math.sin(S.heading) * sp; S.vz = Math.cos(S.heading) * sp;
-        const bonus = 350 + deg * 2.5; S.ride.pts += bonus; S.ride.tricks++;
-        pop(deg >= 180 ? 'Aéreo ' + deg + '°' : 'Aéreo', '+' + fmt(bonus));
+        const bonus = 350 + deg * 2.5; award(S.ride, deg >= 180 ? 'Aéreo ' + deg + '°' : 'Aéreo', bonus);
+        if (deg >= 360) chDone('aereo360');
         emit(S.pos.x, h, S.pos.z, 0, 3, 0, 40, 1.8); splashSound(0.6);
       } else { S.heading += S.spin; wipeout('caiu de lado no aéreo', 'air'); }
     }
@@ -2227,6 +2394,7 @@ function step(dt) {
   // HUD
   const curPts = S.ride ? S.ride.pts : 0;
   hud.now.textContent = fmt(curPts); hud.total.textContent = fmt(S.total); hud.best.textContent = fmt(S.best);
+  const hs = fmtNota(heatScore()); if ($('sHeat').textContent !== hs) $('sHeat').textContent = hs;
   const speedNow = S.mode === 'paddle' ? Math.hypot(S.vx, S.vz) : (S.mode === 'walk' ? Math.hypot(S.vx, S.vz) : Math.hypot(S.vx, S.vz));
   hud.spd.textContent = Math.round(speedNow * 3.6);
   const tideTxt = 'Maré ' + (TIDE_RATE > 0.15 ? 'enchendo' : TIDE_RATE < -0.15 ? 'vazando' : TIDE > 0 ? 'cheia' : 'baixa') + ' · ' + (LEVEL >= 0 ? '+' : '') + LEVEL.toFixed(1).replace('.', ',') + ' m';
@@ -2497,6 +2665,8 @@ $('waveSize').addEventListener('input', e => { CFG.waveSize = +e.target.value; s
 for (const k of ['bloom', 'flare', 'rays', 'grain', 'drops', 'mist', 'shake']) $('fx-' + k).addEventListener('change', e => { CFG[k] = e.target.checked; saveCfg(); });
 $('bSet').addEventListener('click', () => openSettings());
 $('bMp').addEventListener('click', () => mpOpen());
+$('bBoard').addEventListener('click', () => boardOpen());
+$('boardClose').addEventListener('click', () => boardOpen(false));
 $('mpClose').addEventListener('click', () => mpOpen(false));
 $('setClose').addEventListener('click', () => openSettings(false));
 $('setReset').addEventListener('click', () => { Object.assign(CFG, { quality: IS_TOUCH ? 'medio' : 'alto', beach: 'farol', waveSize: 1, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true }); for (const k of TYPE_KEYS) CFG.types[k] = true; saveCfg(); applyQuality(); syncSettingsUI(); });
@@ -2579,7 +2749,7 @@ function netSend() {
   const bp = [r2(_np.x), r2(_np.y), r2(_np.z)], bq = [r3(_nq.x), r3(_nq.y), r3(_nq.z), r3(_nq.w)];
   const j = []; for (const jt of JL()) { const q = jt.quaternion; j.push(r3(q.x), r3(q.y), r3(q.z), r3(q.w)); }
   const pr = {
-    v: 1, nm: NET.nick || '', ts: Date.now(), ja: NET.joinedAt, m: S.mode, hp, hq, bp, bq, j, hy: r3(J.hips.position.y),
+    v: 1, bd: CFG.board, pt: CFG.paint, nm: NET.nick || '', ts: Date.now(), ja: NET.joinedAt, m: S.mode, hp, hq, bp, bq, j, hy: r3(J.hips.position.y),
     vx: r2(S.vx || 0), vz: r2(S.vz || 0),
     sc: [Math.round(S.total), Math.round(S.best), Math.round(S.ride ? S.ride.pts : 0)],
     cfg: { ws: CFG.waveSize, bc: CFG.beach, ty: TYPE_KEYS.filter(k => CFG.types[k]).join(',') },
@@ -2691,6 +2861,8 @@ function updateNet(dt) {
     if (Array.isArray(t.bq)) { _aq.set(t.bq[0], t.bq[1], t.bq[2], t.bq[3]).normalize(); av.b.quaternion.slerp(_aq, k); }
     const JLs = [av.J.hips, av.J.spine, av.J.head, av.J.shL, av.J.elL, av.J.shR, av.J.elR, av.J.hipL, av.J.knL, av.J.hipR, av.J.knR];
     if (Array.isArray(t.j) && t.j.length === JLs.length * 4) JLs.forEach((jt, i) => { _aq.set(t.j[i * 4], t.j[i * 4 + 1], t.j[i * 4 + 2], t.j[i * 4 + 3]); if (_aq.lengthSq() > 0.5) jt.quaternion.slerp(_aq.normalize(), k); });
+    const look = (BOARDS[t.bd] ? t.bd : 'short') + '|' + (PAINTS.some(p => p.k === t.pt) ? t.pt : 'classica');
+    if (av.b.userData.look !== look) applyBoardLook(av.b, look.split('|')[0], look.split('|')[1]);
     if (typeof t.hy === 'number') av.J.hips.position.y = lerp(av.J.hips.position.y, clamp(t.hy, 0.2, 1.2), k);
     av.fresh = false;
     // nome em cima da cabeça, com o que a pessoa está fazendo
