@@ -50,8 +50,16 @@ canvas#c{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
 #hint{bottom:calc(22px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);font-size:16px;font-weight:600;text-align:center;max-width:min(92vw,620px);text-shadow:0 1px 6px rgba(0,0,0,.45)}
 #hint b{font-family:var(--display);font-weight:400;color:#ffd166;letter-spacing:.04em}
 #wave{bottom:calc(96px + env(safe-area-inset-bottom,0px));white-space:nowrap;left:50%;transform:translateX(-50%);font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--sand);font-weight:700;text-shadow:0 1px 6px rgba(0,0,0,.5)}
-#net{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;padding:4px 9px;border-radius:999px;background:var(--ink-soft);color:var(--sand)}
+#net{max-width:min(72vw,380px);text-align:right;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;padding:4px 9px;border-radius:999px;background:var(--ink-soft);color:var(--sand)}
 #net.on{color:var(--sea)}
+.mpcode{font-family:var(--display);font-size:44px;line-height:1;letter-spacing:.14em;color:#ffd166}
+.mprow{display:flex;gap:8px;flex-wrap:wrap}
+.mprow input{flex:1 1 120px}
+.sheet input[type=text]{font:600 16px var(--body);padding:9px 12px;border-radius:10px;border:1px solid rgba(251,246,236,.28);background:rgba(251,246,236,.08);color:var(--foam);min-width:0;width:100%;box-sizing:border-box}
+.mplabel{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--sand)}
+.mplist{margin:0;padding-left:18px;font-size:14px;line-height:1.6}
+.mpstatus{margin:0;font-size:13.5px;color:#ffd166}
+#net.off{color:var(--sand);opacity:.8;letter-spacing:.06em;text-transform:none;font-weight:600}
 #players{display:flex;flex-direction:column;gap:3px;min-width:190px;max-width:260px;font-size:13px}
 #players .ph{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--sand);font-weight:700;margin-bottom:2px}
 #players .pr{display:flex;justify-content:space-between;gap:10px}
@@ -140,13 +148,14 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div id="speed" class="panel"><span class="v" id="spd">0</span><span class="u">KM/H</span></div>
     <span id="mode">Na areia</span>
     <span id="tide" class="tide"></span>
-    <span id="net" hidden>Conectando…</span>
+    <span id="net" class="off">Um jogador</span>
     <div id="players" class="panel" hidden></div>
     <div class="tools">
       <button id="bTime" type="button">Meio-dia (T)</button>
       <button id="bSound" type="button">Som: ligado (M)</button>
       <button id="bHelp" type="button">Ajuda (H)</button>
       <button id="bSet" type="button">Ajustes (O)</button>
+      <button id="bMp" type="button" hidden>Multiplayer (P)</button>
     </div>
   </div>
 
@@ -173,6 +182,14 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div id="stick"><div id="knob"></div></div>
     <button class="tbtn" id="tAct" type="button">Prancha</button>
     <button class="tbtn" id="tJump" type="button">Pular</button>
+  </div>
+
+  <div id="mp" class="sheet" hidden role="dialog" aria-labelledby="mpTitle">
+    <div class="sheet-head">
+      <h2 id="mpTitle">Multiplayer</h2>
+      <button id="mpClose" type="button" aria-label="Fechar multiplayer">Fechar</button>
+    </div>
+    <section id="mpBody"></section>
   </div>
 
   <div id="settings" class="sheet" hidden role="dialog" aria-labelledby="setTitle">
@@ -1487,6 +1504,7 @@ const keys = {};
 const pressed = {};
 const touchAxis = { x: 0, y: 0 };
 addEventListener('keydown', e => {
+  if (e.target instanceof HTMLInputElement) return;   // digitando nome ou código da sala
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   if (!keys[e.code]) pressed[e.code] = true;
   keys[e.code] = true;
@@ -1789,7 +1807,8 @@ function step(dt) {
   if (take('KeyH')) $('help').hidden = !$('help').hidden;
   if (take('KeyR')) respawn();
   if (take('KeyO')) openSettings();
-  if (take('Escape')) openSettings(false);
+  if (take('KeyP') && !$('bMp').hidden) mpOpen();
+  if (take('Escape')) { openSettings(false); mpOpen(false); }
   if (S.mode !== 'ride') S.tubeCam = lerp(S.tubeCam || 0, 0, 1 - Math.exp(-3 * dt));
   if (lastCrash > 0.6) shakeT = Math.max(shakeT, clamp(lastCrash - 0.6, 0, 1) * 0.3);
   const ax = axisX(), ay = axisY();
@@ -2418,6 +2437,8 @@ document.querySelectorAll('[data-q]').forEach(b => b.addEventListener('click', (
 $('waveSize').addEventListener('input', e => { CFG.waveSize = +e.target.value; saveCfg(); syncSettingsUI(); });
 for (const k of ['bloom', 'flare', 'rays', 'grain', 'drops', 'mist', 'shake']) $('fx-' + k).addEventListener('change', e => { CFG[k] = e.target.checked; saveCfg(); });
 $('bSet').addEventListener('click', () => openSettings());
+$('bMp').addEventListener('click', () => mpOpen());
+$('mpClose').addEventListener('click', () => mpOpen(false));
 $('setClose').addEventListener('click', () => openSettings(false));
 $('setReset').addEventListener('click', () => { Object.assign(CFG, { quality: IS_TOUCH ? 'medio' : 'alto', waveSize: 1, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true }); for (const k of TYPE_KEYS) CFG.types[k] = true; saveCfg(); applyQuality(); syncSettingsUI(); });
 
@@ -2435,6 +2456,7 @@ $('go').addEventListener('click', () => {
   camera.position.set(0, 3.5, -30);
   enterWalk();
   setHint('Sua prancha está na areia, marcada pela seta amarela');
+  if (MP.prefill && !$('bMp').hidden) mpOpen(true);
   canvas.focus && canvas.focus();
 });
 /* ---------- Multiplayer online ----------
@@ -2498,7 +2520,7 @@ function netSend() {
   const bp = [r2(_np.x), r2(_np.y), r2(_np.z)], bq = [r3(_nq.x), r3(_nq.y), r3(_nq.z), r3(_nq.w)];
   const j = []; for (const jt of JL()) { const q = jt.quaternion; j.push(r3(q.x), r3(q.y), r3(q.z), r3(q.w)); }
   const pr = {
-    v: 1, ts: Date.now(), ja: NET.joinedAt, m: S.mode, hp, hq, bp, bq, j, hy: r3(J.hips.position.y),
+    v: 1, nm: NET.nick || '', ts: Date.now(), ja: NET.joinedAt, m: S.mode, hp, hq, bp, bq, j, hy: r3(J.hips.position.y),
     vx: r2(S.vx || 0), vz: r2(S.vz || 0),
     sc: [Math.round(S.total), Math.round(S.best), Math.round(S.ride ? S.ride.pts : 0)],
     cfg: { ws: CFG.waveSize, ty: TYPE_KEYS.filter(k => CFG.types[k]).join(',') },
@@ -2522,7 +2544,7 @@ async function resolveNames(peers) {
   if (!ids.length) return;
   try { const ps = await NET.user.profiles(ids); for (const id of ids) NET.names[id] = (ps && ps[id] && ps[id].name) || ''; } catch (e) { for (const id of ids) NET.names[id] = ''; }
 }
-function peerName(p) { return (p.by && NET.names[p.by]) || ('Surfista ' + p.peer.slice(0, 3).toUpperCase()); }
+function peerName(p) { return (p.by && NET.names[p.by]) || cleanNick(p.presence && p.presence.nm) || ('Surfista ' + p.peer.slice(-3).toUpperCase()); }
 function onRoomPeers(ch) {
   const peers = ch.peers;
   resolveNames(peers);
@@ -2547,8 +2569,13 @@ function onRoomPeers(ch) {
       if (!first) feed(av.name + ': ' + pr.ev.t + (pr.ev.s ? ' · ' + pr.ev.s : ''));
     }
     // relógio do mar: amostra do anfitrião (o atraso da rede só faz subestimar, então vale a maior das amostras recentes)
-    if (!NET.isHost && p.peer === NET.hostPeer && typeof pr.ts === 'number') {
+    // só vale uma mensagem NOVA do anfitrião (está em ch.updated): a cópia guardada que chega quando você entra
+    // pode ser de segundos atrás (aba dele parada) e atrasaria o mar
+    if (!NET.isHost && p.peer === NET.hostPeer && typeof pr.ts === 'number' && ch.updated.includes(p) && Math.abs(pr.ts - (NET.lastHostTs || 0)) > 1) {
+      NET.lastHostTs = pr.ts;
       NET.offSamples.push(pr.ts - Date.now()); if (NET.offSamples.length > 40) NET.offSamples.shift();
+    }
+    if (!NET.isHost && p.peer === NET.hostPeer) {
       const cfgTy = typeof (pr.cfg && pr.cfg.ty) === 'string' ? pr.cfg.ty.split(',') : null;
       if (cfgTy) { const types = {}; for (const k of TYPE_KEYS) types[k] = cfgTy.includes(k); NET.hostCfg = { ws: clamp(+pr.cfg.ws || 1, 0.5, 2.5), types }; }
     }
@@ -2558,13 +2585,20 @@ function onRoomPeers(ch) {
   renderPlayers(peers);
 }
 function renderPlayers(peers) {
-  const box = $('players'); if (!box) return;
+  NET.lastPeers = peers;
+  if (NET.rpT) return;
+  NET.rpT = setTimeout(() => { NET.rpT = 0; drawPlayers(NET.lastPeers); }, 250);
+}
+function drawPlayers(peers) {
+  const box = $('players'); if (!box || !peers) return;
   const rows = peers.filter(p => p.kind === 'viewer').map(p => {
     const pr = p.presence || {}; const sc = Array.isArray(pr.sc) ? pr.sc : [0, 0, 0];
     const me = p.isMe && p.sameTab;
     return { name: me ? 'Você' : peerName(p), total: me ? S.total : (+sc[0] || 0), mode: me ? S.mode : pr.m, me, host: p.peer === NET.hostPeer };
   }).sort((a, b) => b.total - a.total).slice(0, 8);
   box.hidden = rows.length < 2;
+  if (NET.on) setNet((NET.via === 'peer' && MP.code ? 'Sala ' + MP.code : 'Online') + ' · ' + rows.length + (rows.length === 1 ? ' surfista na praia' : ' surfistas na praia'), 'on');
+  if (NET.via === 'peer' && !$('mp').hidden && MP.state === 'in') mpRender();
   box.textContent = '';
   const h = document.createElement('div'); h.className = 'ph'; h.textContent = 'Na praia agora · ' + rows.length; box.appendChild(h);
   for (const r of rows) {
@@ -2609,18 +2643,201 @@ function updateNet(dt) {
     av.tag.scale.set(1.6 * clamp(d / 12, 0.7, 4), 0.4 * clamp(d / 12, 0.7, 4), 1);
   }
 }
-async function netConnect() {
-  if (!(window.claude && typeof window.claude.use === 'function')) return;   // fora do claude.ai: só um jogador
-  let room = null;
-  try { room = await window.claude.use('room'); } catch (e) { room = null; }
-  if (!room) return;
-  try { NET.user = await window.claude.use('user'); } catch (e) { NET.user = null; }
-  NET.room = room;
-  room.onPeers(onRoomPeers, () => { NET.room = null; for (const p of [...NET.avatars.keys()]) dropAvatar(p); $('players').hidden = true; });
-  room.onConnection(c => { NET.on = c; $('net').textContent = c ? 'Online' : 'Conectando…'; $('net').className = c ? 'on' : ''; });
-  $('net').hidden = false;
+function setNet(text, cls) { const n = $('net'); if (!n) return; if (n.textContent !== text) n.textContent = text; n.className = cls; }
+function attachRoom(room, viaClaude) {
+  NET.room = room; NET.via = viaClaude ? 'claude' : 'peer';
+  room.onPeers(onRoomPeers, () => { NET.room = null; NET.on = false; setNet('Multiplayer desconectado · recarregue a página', 'off'); for (const p of [...NET.avatars.keys()]) dropAvatar(p); $('players').hidden = true; });
+  room.onConnection(c => { NET.on = c; if (c) renderPlayers(room.peers()); else if (NET.room === room) setNet('Reconectando…', ''); });
   netSend();
 }
+async function netConnect() {
+  NET.nick = mpNick();
+  if (window.claude && typeof window.claude.use === 'function') {
+    setNet('Conectando ao multiplayer…', '');
+    let room = null;
+    try { room = await window.claude.use('room'); } catch (e) { room = null; }
+    if (room) { try { NET.user = await window.claude.use('user'); } catch (e) { NET.user = null; } attachRoom(room, true); return; }
+  }
+  // sem a sala do claude.ai (site do GitHub, .exe, arquivo salvo): multiplayer por código de sala
+  $('bMp').hidden = false;
+  setNet('Um jogador · Multiplayer (P) para jogar com amigos', 'off');
+  const q = new URLSearchParams(location.search).get('sala');
+  if (q) { MP.prefill = q.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6); MP.status = 'Você recebeu um convite: escolha seu nome e clique em Entrar.'; }
+}
+/* ---------- Multiplayer por código de sala (site do GitHub e .exe) ----------
+   Mesma técnica do Losters: PeerJS (WebRTC). O servidor gratuito do PeerJS só serve para os aparelhos se acharem;
+   depois a conversa é direta entre eles. Os STUN do Google e da Twilio descobrem o endereço de cada um na internet
+   e, quando a rede não deixa conectar direto, o TURN gratuito repassa. Sem VPN e sem rede local.
+   Diferente do Losters, ninguém transmite vídeo da tela: cada surfista manda o próprio estado (o mesmo pacote que
+   vai na sala do claude.ai) e quem criou a sala repassa para os outros. O mar já é igual para todos porque as ondas
+   são uma conta do tempo. Esta "sala" tem a mesma interface da room do claude.ai, então o resto do jogo não muda. */
+const MP_PREFIX = 'mare-dourada-', MP_MAX = 8;
+const MP_ICE = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+];
+const PEERJS_SRC = ['js/peerjs.min.js', 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'];
+function loadScript(src) { return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => { s.remove(); no(new Error(src)); }; document.head.appendChild(s); }); }
+async function loadPeerJS() {
+  for (const src of PEERJS_SRC) { if (window.Peer) break; try { await loadScript(src); } catch (e) { } }
+  return typeof window.Peer === 'function';
+}
+const cleanNick = t => String(t || '').replace(/[^\p{L}\p{N} _.-]/gu, '').trim().slice(0, 12);
+function makePeerRoom(peer, isHost, code, onEnd) {
+  const me = peer.id, map = new Map(), hs = [], cs = [], guests = new Map();
+  let myPres = {}, connected = false, dead = false, hostConn = null, pend = { j: [], l: [], u: [] }, sched = false;
+  const mk = (id, pres) => Object.freeze({ peer: id, by: null, isMe: id === me, sameTab: id === me, kind: 'viewer', guest: false, presence: Object.freeze(pres || {}), updatedAt: Date.now() });
+  const flush = () => {
+    sched = false; const ch = { peers: Object.freeze([...map.values()]), joined: pend.j, left: pend.l, updated: pend.u }; pend = { j: [], l: [], u: [] };
+    for (const h of hs) { try { h(ch); } catch (e) { console.error(e); } }
+  };
+  const queue = (k, p) => { pend[k].push(p); if (!sched) { sched = true; setTimeout(flush, 0); } };
+  const setPeer = (id, pres) => { const had = map.has(id); const p = mk(id, pres); map.set(id, p); queue(had ? 'u' : 'j', p); };
+  const delPeer = id => { const p = map.get(id); if (!p) return; map.delete(id); queue('l', p); };
+  const setConn = c => { if (c === connected) return; connected = c; for (const h of cs) h(c); };
+  const send = (c, msg) => { try { if (c && c.open) c.send(msg); } catch (e) { } };
+  const okPres = p => p && typeof p === 'object' && !Array.isArray(p) && JSON.stringify(p).length <= 4096;   // mesmo limite da sala do claude.ai
+  map.set(me, mk(me, {}));
+  const room = {
+    code, isHost,
+    presence(patch) {
+      if (dead) return Promise.resolve();
+      myPres = Object.assign({}, myPres, patch); for (const k in patch) if (patch[k] === null) delete myPres[k];
+      setPeer(me, myPres);
+      if (isHost) for (const c of guests.values()) send(c, { u: me, p: myPres }); else send(hostConn, { p: myPres });
+      return Promise.resolve();
+    },
+    onPeers(h) { hs.push(h); setTimeout(() => { const all = Object.freeze([...map.values()]); h({ peers: all, joined: all, left: [], updated: [] }); }, 0); return () => { const i = hs.indexOf(h); if (i >= 0) hs.splice(i, 1); }; },
+    onConnection(h) { cs.push(h); setTimeout(() => h(connected), 0); return () => { const i = cs.indexOf(h); if (i >= 0) cs.splice(i, 1); }; },
+    connected: () => connected,
+    peers: () => Object.freeze([...map.values()]),
+    count: () => map.size,
+    leave(msg) {
+      if (dead) return; dead = true;
+      for (const id of [...map.keys()]) if (id !== me) delPeer(id);
+      setConn(false);
+      try { peer.destroy(); } catch (e) { }
+      onEnd(msg || '');
+    },
+  };
+  if (isHost) {
+    setConn(true);
+    peer.on('connection', conn => {
+      conn.on('open', () => {
+        if (dead) return conn.close();
+        if (guests.size >= MP_MAX - 1) { send(conn, { full: 1 }); setTimeout(() => conn.close(), 500); return; }
+        guests.set(conn.peer, conn);
+        send(conn, { all: [...map.values()].map(p => [p.peer, p.presence]) });   // quem chega já recebe todo mundo
+      });
+      conn.on('data', d => {
+        if (!guests.has(conn.peer) || !d || typeof d !== 'object' || !okPres(d.p)) return;
+        setPeer(conn.peer, d.p);
+        for (const [id, c] of guests) if (id !== conn.peer) send(c, { u: conn.peer, p: d.p });
+      });
+      const bye = () => { if (!guests.delete(conn.peer)) return; delPeer(conn.peer); for (const c of guests.values()) send(c, { l: conn.peer }); };
+      conn.on('close', bye); conn.on('error', bye);
+    });
+  } else {
+    hostConn = peer.connect(MP_PREFIX + code, { reliable: true });
+    hostConn.on('open', () => { setConn(true); send(hostConn, { p: myPres }); });
+    hostConn.on('data', d => {
+      if (!d || typeof d !== 'object') return;
+      if (d.full) return room.leave('A sala está cheia (no máximo ' + MP_MAX + ' surfistas).');
+      if (Array.isArray(d.all)) for (const e of d.all) if (Array.isArray(e) && typeof e[0] === 'string' && e[0] !== me && okPres(e[1])) setPeer(e[0], e[1]);
+      if (typeof d.u === 'string' && d.u !== me && okPres(d.p)) setPeer(d.u, d.p);
+      if (typeof d.l === 'string') delPeer(d.l);
+    });
+    hostConn.on('close', () => room.leave('A sala acabou: quem criou saiu.'));
+    hostConn.on('error', () => room.leave('A conexão com a sala caiu.'));
+  }
+  // se cair só o servidor de encontro, as conexões diretas continuam; tenta voltar para aceitar gente nova
+  peer.on('disconnected', () => { if (!dead) { try { peer.reconnect(); } catch (e) { } } });
+  return room;
+}
+const MP = { state: 'idle', status: '', code: '', peer: null };
+function mpNick() { let n = ''; try { n = localStorage.getItem('mare-dourada-nome') || ''; } catch (e) { } return cleanNick(n); }
+async function mpStart(host, code) {
+  if (MP.state !== 'idle') return;
+  const nick = cleanNick(($('mpName') || {}).value) || 'Surfista';
+  try { localStorage.setItem('mare-dourada-nome', nick); } catch (e) { }
+  NET.nick = nick;
+  code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!host && code.length < 4) { MP.status = 'Digite o código da sala.'; return mpRender(); }
+  MP.state = 'connecting'; MP.status = 'Carregando o multiplayer…'; mpRender();
+  if (!(await loadPeerJS())) { MP.state = 'idle'; MP.status = 'Não foi possível carregar o multiplayer. Confira a internet.'; return mpRender(); }
+  if (host) code = Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[(Math.random() * 32) | 0]).join('');
+  MP.code = code; MP.status = host ? 'Criando sala…' : 'Procurando a sala ' + code + '…'; mpRender();
+  const peer = host ? new Peer(MP_PREFIX + code, { config: { iceServers: MP_ICE } }) : new Peer({ config: { iceServers: MP_ICE } });
+  MP.peer = peer;
+  let started = false;
+  const timer = setTimeout(() => { if (!started) fail('Demorou demais para conectar (15 s). Tente de novo.'); }, 15000);
+  function fail(msg) { clearTimeout(timer); if (MP.room) MP.room.leave(msg); else { try { peer.destroy(); } catch (e) { } mpEnded(msg); } }
+  peer.on('error', e => {
+    if (!started && host && e.type === 'unavailable-id') { clearTimeout(timer); try { peer.destroy(); } catch (x) { } MP.state = 'idle'; return mpStart(true); }   // código repetido: sorteia outro
+    const why = { 'peer-unavailable': 'Sala não encontrada. Confira o código.', network: 'Sem conexão com o servidor de salas.', 'server-error': 'O servidor de salas não respondeu.', 'socket-error': 'Sem conexão com o servidor de salas.', 'browser-incompatible': 'Este navegador não tem WebRTC.' }[e.type];
+    if (!started || e.type === 'peer-unavailable' || e.type === 'browser-incompatible') fail(why || 'Erro de conexão: ' + e.type);
+  });
+  peer.on('open', () => {
+    if (host) { clearTimeout(timer); started = true; }
+    NET.joinedAt = host ? 0 : Date.now();   // quem cria a sala é sempre o anfitrião (relógio do mar e regras das ondas)
+    const room = makePeerRoom(peer, host, code, mpEnded);
+    MP.room = room;
+    if (!host) room.onConnection(c => { if (c && !started) { started = true; clearTimeout(timer); MP.state = 'in'; MP.status = ''; mpRender(); } });
+    else { MP.state = 'in'; MP.status = 'Sala criada! Passe o código para seus amigos.'; }
+    attachRoom(room, false);
+    mpRender();
+  });
+}
+function mpLeave() { if (MP.room) MP.room.leave(''); else mpEnded(''); }
+function mpEnded(msg) {
+  MP.room = null; MP.peer = null; MP.state = 'idle'; MP.status = msg || ''; MP.code = '';
+  NET.room = null; NET.on = false; NET.isHost = true; NET.hostCfg = null; NET.hostPeer = null; NET.offSamples.length = 0; NET.joinedAt = Date.now();
+  for (const p of [...NET.avatars.keys()]) dropAvatar(p);
+  $('players').hidden = true;
+  setNet(msg ? 'Um jogador · ' + msg : 'Um jogador · Multiplayer (P) para jogar com amigos', 'off');
+  if (msg) feed(msg);
+  mpRender();
+}
+function mpOpen(open) {
+  const el = $('mp'); el.hidden = open === undefined ? !el.hidden : !open;
+  if (!el.hidden) { mpRender(); if (document.pointerLockElement) document.exitPointerLock(); }
+}
+function mpRender() {
+  const box = $('mpBody'); if (!box) return;
+  box.textContent = '';
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; box.appendChild(e); return e; };
+  const btn = (txt, fn, cls) => { const b = el('button', cls || '', txt); b.type = 'button'; b.addEventListener('click', fn); return b; };
+  if (MP.state === 'in' && MP.room) {
+    el('p', 'note', 'Código da sala');
+    el('div', 'mpcode', MP.code);
+    const row = el('div', 'mprow');
+    const copy = (txt, done) => { try { navigator.clipboard.writeText(txt).then(() => { MP.status = done; mpRender(); }, () => { MP.status = txt; mpRender(); }); } catch (e) { MP.status = txt; mpRender(); } };
+    const b1 = btn('Copiar código', () => copy(MP.code, 'Código copiado.')); row.appendChild(b1);
+    if (/^https?:/.test(location.protocol)) { const b2 = btn('Copiar convite', () => copy(location.origin + location.pathname + '?sala=' + MP.code, 'Convite copiado: quem abrir o link já cai na tela de entrar.')); row.appendChild(b2); }
+    const peers = MP.room.peers();
+    el('p', 'note', 'Surfistas na sala (' + peers.length + '/' + MP_MAX + '):');
+    const ul = el('ul', 'mplist');
+    for (const p of peers) { const li = document.createElement('li'); li.textContent = (p.isMe ? 'Você' : cleanNick(p.presence && p.presence.nm) || 'Surfista') + (p.presence && p.presence.ja === 0 ? ' ★ criou a sala' : ''); ul.appendChild(li); }
+    el('p', 'note', 'Quem criou a sala escolhe o tamanho e os tipos de onda para todos. Se quem criou sair, a sala acaba.');
+    btn('Sair da sala', mpLeave, 'ghost');
+  } else if (MP.state === 'connecting') {
+    el('p', 'note', 'Conectando…');
+  } else {
+    el('p', 'note', 'Jogue com amigos pela internet, no PC ou no celular, sem VPN: quem cria a sala passa o código e os outros entram com ele.');
+    const lab = el('label', 'mplabel', 'Seu nome');
+    const inp = document.createElement('input'); inp.type = 'text'; inp.id = 'mpName'; inp.maxLength = 12; inp.placeholder = 'Surfista'; inp.value = NET.nick || mpNick(); lab.appendChild(inp);
+    btn('Criar sala', () => mpStart(true));
+    const row = el('div', 'mprow');
+    const ci = document.createElement('input'); ci.type = 'text'; ci.id = 'mpCode'; ci.maxLength = 6; ci.placeholder = 'CÓDIGO'; ci.value = MP.prefill || ''; ci.style.textTransform = 'uppercase'; row.appendChild(ci);
+    ci.addEventListener('keydown', e => { if (e.key === 'Enter') mpStart(false, ci.value); });
+    const b = btn('Entrar', () => mpStart(false, ci.value)); row.appendChild(b);
+  }
+  if (MP.status) el('p', 'mpstatus', MP.status);
+}
+
 netConnect();
 requestAnimationFrame(frame);
 })();

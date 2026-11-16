@@ -14,6 +14,16 @@ Jogo de surf em 3D numa baía ao pôr do sol. Ande pela praia, pegue a prancha, 
 
 Precisa do Microsoft Edge WebView2, que já vem no Windows 10 e 11.
 
+## Multiplayer
+
+1. Aperte **P** (ou o botão **Multiplayer**), escreva seu nome e clique em **Criar sala**.
+2. Passe o **código** (ex.: `K7QXM`) para os amigos, ou clique em **Copiar convite** e mande o link.
+3. Os amigos abrem o jogo, apertam **P**, digitam o código e clicam em **Entrar**. Até 8 surfistas por sala.
+
+Funciona pela internet, no PC e no celular, sem VPN e sem estar na mesma rede. É a mesma técnica do [Losters](https://github.com/Heitorcoser/Losters): [PeerJS](https://peerjs.com) (WebRTC), com o servidor gratuito do PeerJS só para os aparelhos se acharem, STUN para atravessar o roteador e um servidor TURN gratuito quando a rede não deixa conectar direto. Cada surfista manda só o próprio estado; o mar é igual para todos porque as ondas são uma conta do tempo, e o relógio e as regras das ondas são de quem criou a sala. Se quem criou a sala sair, ela acaba.
+
+Aberto como artefato no claude.ai, o jogo usa a sala do próprio claude.ai: quem tem acesso ao link e está logado cai na mesma praia automaticamente.
+
 ## Comandos
 
 | Tecla | O que faz |
@@ -30,6 +40,7 @@ Precisa do Microsoft Edge WebView2, que já vem no Windows 10 e 11.
 | Mouse / roda | girar a câmera / zoom |
 | T | fim de tarde ou meio-dia |
 | O | ajustes de gráficos, efeitos e ondas |
+| P | multiplayer (criar ou entrar numa sala) |
 | R | voltar para a areia |
 
 ## O que tem
@@ -40,14 +51,14 @@ Precisa do Microsoft Edge WebView2, que já vem no Windows 10 e 11.
 - Duck dive para furar a espuma e o lábio quando você rema para o fundo.
 - Regras de tubo justas: dá para estolar lá dentro; a vaca só vem se o lábio cair em você ou se o tubo desabar com você dentro.
 - Câmera que nunca entra embaixo d'água e maré contínua, sem saltos.
-- Multiplayer online quando o jogo é aberto como artefato no claude.ai: todo mundo na mesma praia e no mesmo mar, com placar. No site e no `.exe` o jogo roda em modo de um jogador.
+- Multiplayer online sem VPN, no site, no `.exe` e no claude.ai: todo mundo na mesma praia e no mesmo mar, com placar e avisos das manobras e vacas dos outros.
 - Espraiamento, refluxo, maré e areia molhada baseados em Stockdon et al. (2006).
 - Manobras reconhecidas pela posição na parede, com pontos que premiam variedade.
 - Ajustes de gráficos (Baixo a Ultra), efeitos de câmera e tamanho das ondas.
 
 ## Rodar a partir do código
 
-O jogo é um único `resources/index.html` com three.js r128 em `resources/js/`. Para gerar o executável com [Neutralinojs](https://neutralino.js.org):
+O jogo é um único `resources/index.html` com three.js r128 e PeerJS 1.5.4 (licença MIT em `resources/js/PEERJS-LICENSE`) em `resources/js/`. Para gerar o executável com [Neutralinojs](https://neutralino.js.org):
 
 ```bash
 npx @neutralinojs/neu@11.8.0 update
