@@ -218,6 +218,11 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
       </div>
     </section>
     <section>
+      <h3>Praia</h3>
+      <div class="chips" id="beachChips" role="group" aria-label="Tipo de praia"></div>
+      <p class="note">O fundo decide como a onda quebra. A praia nova vale a partir da próxima onda.</p>
+    </section>
+    <section>
       <h3>Ondas</h3>
       <div class="range">
         <label for="waveSize">Tamanho</label>
@@ -283,7 +288,7 @@ function terrainH(x, z) {
 }
 /* ---------- Ajustes salvos ---------- */
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
-const CFG = { quality: IS_TOUCH ? 'medio' : 'alto', waveSize: 1.0, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true, types: null };
+const CFG = { quality: IS_TOUCH ? 'medio' : 'alto', beach: 'farol', waveSize: 1.0, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true, types: null };
 try { Object.assign(CFG, JSON.parse(localStorage.getItem('mare-dourada-cfg') || '{}')); } catch (e) { }
 function saveCfg() { try { localStorage.setItem('mare-dourada-cfg', JSON.stringify(CFG)); } catch (e) { } }
 const QUAL = {
@@ -317,8 +322,20 @@ const WTYPES = {
   surgente:   { name: 'Surgente',   desc: 'sobe a areia sem quebrar', mode: 1, dir: 0, vp: 99, hollow: 0.0, zAbs: 13, size: 0.6, shoreW: 3.0, swash: 1.7, weight: 0.7 }
 };
 const TYPE_KEYS = Object.keys(WTYPES);
+/* Tipos de praia: o FUNDO decide como a onda quebra. O dono da sala (anfitrião ★) escolhe; vale a partir da próxima onda.
+   max = limite do tamanho no ajuste · mult = tamanho base · hAdd = quanto o fundo raso deixa a onda mais oca
+   zAdd/zMax = quebra mais para fora ou mais perto · shB = o fundo junta a energia mais cedo (a onda já chega grande lá fora) */
+const BEACHES = {
+  farol:  { name: 'Praia do Farol', desc: 'areia, de tudo um pouco', max: 2.5, types: null, mult: 1, hAdd: 0, zAdd: 0, zMax: 195, shB: 0 },
+  baia:   { name: 'Baía Mansa', desc: 'fundo suave: ondas cheias para treinar', max: 1.5, types: ['cheia', 'pico', 'ponta', 'beira', 'surgente'], mult: 0.75, hAdd: -0.25, zAdd: 15, zMax: 195, shB: 0 },
+  recife: { name: 'Recife da Laje', desc: 'pedra rasa: tubos grossos e rápidos', max: 3.0, types: ['laje', 'cunha', 'direita', 'esquerda', 'dupla', 'pico'], mult: 1.15, hAdd: 0.2, zAdd: -8, zMax: 195, shB: 0.1 },
+  ponta:  { name: 'Ponta do Molhe', desc: 'promontório e molhe: paredes longas', max: 2.5, types: ['ponta', 'cunha', 'direita', 'esquerda'], mult: 1, hAdd: 0, zAdd: 5, zMax: 195, shB: 0 },
+  canhao: { name: 'Canhão', desc: 'um cânion no fundo junta a energia: ondas gigantes', max: 5.0, types: ['pico', 'dupla', 'fora', 'fechadeira', 'laje'], mult: 1.6, hAdd: 0.1, zAdd: 25, zMax: 222, shB: 0.45 }
+};
+const BEACH_KEYS = Object.keys(BEACHES);
 if (!CFG.types || typeof CFG.types !== 'object') CFG.types = {};
 for (const k of TYPE_KEYS) if (typeof CFG.types[k] !== 'boolean') CFG.types[k] = true;
+if (!BEACHES[CFG.beach]) CFG.beach = 'farol';
 
 let T = 24; // tempo do mar
 let LEVEL = 0; // nível da água na beira: negativo = recuou, positivo = subiu
@@ -369,11 +386,12 @@ function waveParams(n) {
   let p = WCACHE.get(n);
   if (p) return p;
   const set = (((n % 4) + 4) % 4) === 0;
+  const cfg = waveCfg(), B = BEACHES[cfg.beach] || BEACHES.farol;
   const type = pickType(n, set), ty = WTYPES[type];
   let mult = 0.75 + 0.5 * hash1(n);
   if (set) mult *= 1.35;
-  mult *= ty.size * waveCfg().ws;
-  p = { n, set, type, ty, mult, height: 3.7 * mult, ph2: ((n * 1.3) % TAU + TAU) % TAU };
+  mult *= ty.size * Math.min(cfg.ws, B.max) * B.mult;
+  p = { n, set, type, ty, mult, height: 3.7 * mult, ph2: ((n * 1.3) % TAU + TAU) % TAU, hAdd: B.hAdd, zAdd: B.zAdd, zMax: B.zMax, shB: B.shB };
   WCACHE.set(n, p);
   if (WCACHE.size > 40) for (const k of [...WCACHE.keys()]) if (k < n - 12) WCACHE.delete(k);
   return p;
@@ -392,8 +410,9 @@ const bU = [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()];
 const cU = [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()];
 const dU = [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()];   // pico concentrado (cunha, dupla)
 function pickType(n, set) {
-  const types = waveCfg().types;
-  const on = TYPE_KEYS.filter(k => types[k]); const pool = on.length ? on : ['pico'];
+  const cfg = waveCfg(), types = cfg.types, B = BEACHES[cfg.beach] || BEACHES.farol;
+  const allowed = B.types || TYPE_KEYS;                       // a praia decide que ondas existem nela
+  const on = allowed.filter(k => types[k]); const pool = on.length ? on : allowed;
   let p = pool;
   if (set) { const hol = pool.filter(k => WTYPES[k].hollow >= 1 && !WTYPES[k].zAbs); if (hol.length) p = hol; }
   // sorteio com peso (a "de fora" é rara), igual em todos os jogadores porque só depende de n
@@ -410,23 +429,23 @@ function updateWaves() {
     const w = W[i];
     w.n = n; w.zc = Z0 - C * (T - n * P); w.mult = mult; w.set = set; w.type = type;
     w.ph2 = wp.ph2;
-    w.mode = ty.mode; w.vp = ty.vp; w.hollow = ty.hollow;
+    w.mode = ty.mode; w.vp = ty.vp; w.hollow = ty.hollow > 0 ? Math.max(0.3, ty.hollow + wp.hAdd) : 0; w.shB = wp.shB;
     w.dir = ty.mode === 2 ? (ty.dir || (hash1(n + 5.5) < 0.5 ? -1 : 1)) : 0;
     w.close = ty.mode === 1 ? 1 : 0;
     const side = hash1(n + 21.7) < 0.5 ? -1 : 1;
     w.x0 = ty.x0Abs ? (ty.mode === 2 ? -w.dir * ty.x0Abs : side * ty.x0Abs) * (0.92 + 0.08 * hash1(n + 13.1))
       : ty.mode === 2 ? -w.dir * (55 + hash1(n + 13.1) * 40) : (hash1(n + 13.1) - 0.5) * 140;
     w.peak = ty.peak || 0; w.pw = ty.pw || 30;
-    w.zBreak = ty.zAbs ? ty.zAbs : clamp(80 + 24 * mult + ty.zOff, 60, 195);   // longe da areia; onda maior quebra mais para trás
+    w.zBreak = ty.zAbs ? ty.zAbs : clamp(80 + 24 * mult + ty.zOff + wp.zAdd, 60, wp.zMax);   // longe da areia; onda maior quebra mais para trás
     w.shoreW = ty.shoreW || 14;
     w.height = 3.7 * mult;
-    w.land = clamp(Math.sqrt(2 * w.height / 9.8) * 1.15, 0.6, 2.2);   // queda livre do lábio
+    w.land = clamp(Math.sqrt(2 * w.height / 9.8) * 1.15, 0.6, 3.0);   // queda livre do lábio (onda gigante cai por mais tempo)
     w.e = T - (n * P + (Z0 - w.zBreak) / C);                     // tempo desde que o pico quebrou
     w.eShore = T - (n * P + (Z0 - (ty.zAbs ? 13 : 24)) / C);   // na beira tudo quebra
     wU[i].set(w.zc, w.mult, w.ph2, w.land);
     bU[i].set(w.x0, w.e, w.mode, w.eShore);
     cU[i].set(w.vp, w.dir, w.hollow, w.shoreW);
-    dU[i].set(w.peak, w.pw, 0, 0);
+    dU[i].set(w.peak, w.pw, w.shB, 0);
   }
 }
 function brokenAge(w, x) {
@@ -446,7 +465,7 @@ function waveAt(x, z, out = _wo) {
     const w = W[i];
     const a = brokenAge(w, x), hl = hollowAt(w, x), hc = Math.min(hl, 1);
     const appr = clamp((Z0 - z) / 50, 0, 1);
-    const shoal = clamp((250 - z) / 150, 0, 1);
+    const shoal = clamp((250 - z) / 150 + (w.shB || 0), 0, 1);
     let amp = (1.3 + 2.4 * shoal * shoal) * appr;
     const pre = smooth(-3, 0, a);
     const post = smooth(w.land * 0.9 * hc, w.land + 2.5, a);
@@ -535,7 +554,7 @@ void waveAt(vec2 p, out float h, out float foam){
     float hl = b.z>1.5 ? c.z*smoothstep(-10.0,0.0,dx*c.y) : c.z;
     float hc=min(hl,1.0);
     float appr=clamp((Z0-z)/50.0,0.0,1.0);
-    float shoal=clamp((250.0-z)/150.0,0.0,1.0);
+    float shoal=clamp((250.0-z)/150.0+dd.z,0.0,1.0);
     float amp=(1.3+2.4*shoal*shoal)*appr;
     float pre=smoothstep(-3.0,0.0,a);
     float post=smoothstep(w.w*0.9*hc,w.w+2.5,a);
@@ -686,7 +705,7 @@ function makeWaterMat(far) {
         vec3 base=mix(uShallow,uDeep,smoothstep(0.4,7.0,depth));
         float crest=clamp(vWorld.y*0.4,0.0,1.0);
         float back=pow(max(dot(-V,uSunDir)*0.5+0.5,0.0),3.0);
-        base+=uShallow*crest*(0.35+0.9*back);
+        base+=uShallow*crest*(0.35+0.9*back)*(1.0-0.6*smoothstep(5.0,20.0,vWorld.y));   // parede gigante é grossa: o sol só atravessa perto do topo
         vec3 col=mix(base,sky,fres);
         col+=uSunColor*pow(max(dot(R,uSunDir),0.0),220.0)*2.2;
         col+=uSunColor*pow(max(dot(R,uSunDir),0.0),18.0)*0.12;
@@ -766,7 +785,7 @@ const lipMat = new THREE.ShaderMaterial({
       vec3 base=mix(uShallow,uDeep,smoothstep(0.4,7.0,depth));
       float crest=clamp(vWorld.y*0.4,0.0,1.0);
       float back=pow(max(dot(-V,uSunDir)*0.5+0.5,0.0),3.0);
-      base+=uShallow*crest*(0.35+0.9*back);
+      base+=uShallow*crest*(0.35+0.9*back)*(1.0-0.6*smoothstep(5.0,20.0,vWorld.y));   // parede gigante é grossa: o sol só atravessa perto do topo
       float thin=smoothstep(0.55,1.0,vS);
       base+=uShallow*thin*0.25*back;                       // ponta fina: a luz atravessa
       base*=mix(1.0,0.82,vIn*(1.0-thin));                  // dentro do tubo: sombra
@@ -1862,7 +1881,9 @@ function step(dt) {
     } else {
       setHint(depth > 0.1 ? 'Continue entrando no mar para começar a remar' : 'Leve a prancha até o mar · <b>E</b> larga na areia');
       if (act && depth < 0.1) { S.hasBoard = false; boardToSand(S.pos.x + Math.cos(S.facing) * 1.2, S.pos.z - Math.sin(S.facing) * 1.2, S.facing); enterWalk(); }
-      if (depth > 0.8) enterPaddle(true);
+      // só deita na prancha quando VOCÊ entra no mar (andando para o fundo) ou onde não dá mais pé. Antes bastava a água
+      // passar de 0,8 m: a espuma e a língua d'água subindo a areia te deitavam e levantavam sozinho a cada onda
+      if (depth > 1.3 || (depth > 0.8 && ay > 0.3 && S.vz > 0.4)) enterPaddle(true);
     }
     setMode(depth > 0.15 ? 'Na água' : 'Na areia', '');
     if (LEVEL - TIDE < -0.2 && S.pos.z > -5) hud.wave.textContent = 'A água está recuando: vem série forte';
@@ -2404,14 +2425,24 @@ function applyQuality() {
   waterU.uSparkle.value = q.sparkle;
   resize();
 }
-function waveLabel() { return '≈ ' + (3.7 * CFG.waveSize).toFixed(1).replace('.', ',') + ' m · séries até ' + (3.7 * CFG.waveSize * 1.66).toFixed(1).replace('.', ',') + ' m'; }
+function waveLabel() {
+  // altura que a onda tem DE VERDADE ao quebrar: a que quebra muito longe ainda não empinou tudo (mesma conta do waveAt)
+  const c = waveCfg(), B = BEACHES[c.beach] || BEACHES.farol, mult = Math.min(c.ws, B.max) * B.mult;
+  const real = m => { const zb = clamp(80 + 24 * m + B.zAdd, 60, B.zMax), sh = clamp((250 - zb) / 150 + B.shB, 0, 1); return 3.7 * m * (1.3 + 2.4 * sh * sh) / 3.7 * Math.min(1, (Z0 - zb) / 50); };
+  const f = v => v.toFixed(1).replace('.', ',');
+  return B.name + ' · ≈ ' + f(real(mult)) + ' m · séries até ' + f(real(mult * 1.66)) + ' m';
+}
 function syncSettingsUI() {
   const locked = !NET.isHost && !!NET.hostCfg;
   $('hostNote').hidden = !locked; $('waveSize').disabled = locked;
   document.querySelectorAll('[data-type]').forEach(b => { b.disabled = locked; });
+  const cfgNow = waveCfg(), Bn = BEACHES[cfgNow.beach] || BEACHES.farol;
+  document.querySelectorAll('[data-beach]').forEach(b => { b.disabled = locked; b.setAttribute('aria-pressed', String(b.dataset.beach === cfgNow.beach)); });
+  $('waveSize').max = String(Bn.max);
+  document.querySelectorAll('[data-type]').forEach(b => { b.hidden = !!(Bn.types && !Bn.types.includes(b.dataset.type)); });
   document.querySelectorAll('[data-q]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.q === CFG.quality)));
   document.querySelectorAll('[data-type]').forEach(b => b.setAttribute('aria-pressed', String(!!CFG.types[b.dataset.type])));
-  $('waveSize').value = CFG.waveSize; $('waveVal').textContent = CFG.waveSize.toFixed(1).replace('.', ',') + '×'; $('waveInfo').textContent = waveLabel();
+  const wsShow = Math.min(cfgNow.ws, Bn.max); $('waveSize').value = wsShow; $('waveVal').textContent = wsShow.toFixed(1).replace('.', ',') + '×'; $('waveInfo').textContent = waveLabel();
   for (const k of ['bloom', 'flare', 'rays', 'grain', 'drops', 'mist', 'shake']) $('fx-' + k).checked = !!CFG[k];
   $('postNote').hidden = !!(QUAL[CFG.quality].post && composer);
   $('postNote').textContent = composer ? 'No gráfico Baixo os efeitos de câmera ficam desligados.' : 'Os efeitos de câmera não carregaram neste aparelho.';
@@ -2434,13 +2465,23 @@ document.querySelectorAll('[data-q]').forEach(b => b.addEventListener('click', (
     box.appendChild(b);
   }
 }
+{
+  const box = $('beachChips');
+  for (const k of BEACH_KEYS) {
+    const b = document.createElement('button'); b.type = 'button'; b.dataset.beach = k;
+    const t = document.createElement('b'); t.textContent = BEACHES[k].name; const d = document.createElement('span'); d.textContent = BEACHES[k].desc + ' · até ' + String(BEACHES[k].max).replace('.', ',') + '×';
+    b.append(t, d);
+    b.addEventListener('click', () => { CFG.beach = k; CFG.waveSize = Math.min(CFG.waveSize, BEACHES[k].max); saveCfg(); syncSettingsUI(); });
+    box.appendChild(b);
+  }
+}
 $('waveSize').addEventListener('input', e => { CFG.waveSize = +e.target.value; saveCfg(); syncSettingsUI(); });
 for (const k of ['bloom', 'flare', 'rays', 'grain', 'drops', 'mist', 'shake']) $('fx-' + k).addEventListener('change', e => { CFG[k] = e.target.checked; saveCfg(); });
 $('bSet').addEventListener('click', () => openSettings());
 $('bMp').addEventListener('click', () => mpOpen());
 $('mpClose').addEventListener('click', () => mpOpen(false));
 $('setClose').addEventListener('click', () => openSettings(false));
-$('setReset').addEventListener('click', () => { Object.assign(CFG, { quality: IS_TOUCH ? 'medio' : 'alto', waveSize: 1, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true }); for (const k of TYPE_KEYS) CFG.types[k] = true; saveCfg(); applyQuality(); syncSettingsUI(); });
+$('setReset').addEventListener('click', () => { Object.assign(CFG, { quality: IS_TOUCH ? 'medio' : 'alto', beach: 'farol', waveSize: 1, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true }); for (const k of TYPE_KEYS) CFG.types[k] = true; saveCfg(); applyQuality(); syncSettingsUI(); });
 
 function resize() {
   const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
@@ -2473,7 +2514,7 @@ const NET = { room: null, user: null, on: false, joinedAt: Date.now(), clockOff:
 function seaTime() { return ((((Date.now() + NET.clockOff) / 1000 + tShift) % SEA_PERIOD) + SEA_PERIOD) % SEA_PERIOD; }
 function waveCfg() {
   if (!NET.isHost && NET.hostCfg) return NET.hostCfg;
-  return { ws: CFG.waveSize, types: CFG.types };
+  return { ws: CFG.waveSize, types: CFG.types, beach: CFG.beach };
 }
 const PEER_COLS = [[0x2fd0bc, 0xfdf6e8], [0x3d6fb6, 0xffd166], [0xe8506e, 0xfdf6e8], [0x8a5cf6, 0x2fd0bc], [0xffd166, 0x23394a], [0x3fa34d, 0xffd166], [0xff9f1c, 0x23394a], [0x2b2d42, 0xff7a59]];
 function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -2523,7 +2564,7 @@ function netSend() {
     v: 1, nm: NET.nick || '', ts: Date.now(), ja: NET.joinedAt, m: S.mode, hp, hq, bp, bq, j, hy: r3(J.hips.position.y),
     vx: r2(S.vx || 0), vz: r2(S.vz || 0),
     sc: [Math.round(S.total), Math.round(S.best), Math.round(S.ride ? S.ride.pts : 0)],
-    cfg: { ws: CFG.waveSize, ty: TYPE_KEYS.filter(k => CFG.types[k]).join(',') },
+    cfg: { ws: CFG.waveSize, bc: CFG.beach, ty: TYPE_KEYS.filter(k => CFG.types[k]).join(',') },
     ev: NET.ev
   };
   NET.room.presence(pr).catch(() => { });
@@ -2577,7 +2618,7 @@ function onRoomPeers(ch) {
     }
     if (!NET.isHost && p.peer === NET.hostPeer) {
       const cfgTy = typeof (pr.cfg && pr.cfg.ty) === 'string' ? pr.cfg.ty.split(',') : null;
-      if (cfgTy) { const types = {}; for (const k of TYPE_KEYS) types[k] = cfgTy.includes(k); NET.hostCfg = { ws: clamp(+pr.cfg.ws || 1, 0.5, 2.5), types }; }
+      if (cfgTy) { const types = {}; for (const k of TYPE_KEYS) types[k] = cfgTy.includes(k); NET.hostCfg = { ws: clamp(+pr.cfg.ws || 1, 0.5, 5), types, beach: BEACHES[pr.cfg.bc] ? pr.cfg.bc : 'farol' }; if (!$('settings').hidden) syncSettingsUI(); }
     }
   }
   for (const p of ch.left) { dropAvatar(p.peer); delete NET.seenEv[p.peer]; }

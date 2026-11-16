@@ -45,6 +45,12 @@ Aberto como artefato no claude.ai, o jogo usa a sala do próprio claude.ai: quem
 
 ## O que tem
 
+- Cinco praias, escolhidas por quem criou a sala (o fundo decide como a onda quebra):
+  - **Praia do Farol**: areia, de tudo um pouco (até 2,5×).
+  - **Baía Mansa**: fundo suave, ondas cheias para treinar (até 1,5×).
+  - **Recife da Laje**: pedra rasa, tubos grossos e rápidos (até 3×).
+  - **Ponta do Molhe**: promontório e molhe, paredes longas e cunhas (até 2,5×).
+  - **Canhão**: um cânion no fundo junta a energia, como em Nazaré. Ondas gigantes de até 5× (o dobro do limite das outras), que passam de 20 m nas séries e quebram lá fora.
 - Doze tipos de onda: pico, direita, esquerda, fechadeira, cheia, laje, beira, ponta (point break), dupla (double-up), cunha (wedge do molhe), de fora (a bomba rara da série) e surgente (sobe a areia sem quebrar, pelo número de Iribarren).
 - O lábio é o topo da própria onda: a parede do tubo nasce na face, é arremessado em queda livre (tempo ≈ √(2H/g)) e desaba em espuma quando bate na água.
 - Vaca com mini ragdoll: o corpo solto (juntas bola-e-soquete) é levado pela água, com empuxo, arrasto, espuma empurrando para a praia e o redemoinho da água branca. A prancha fica presa na cordinha.
