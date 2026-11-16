@@ -330,7 +330,7 @@ const BEACHES = {
   baia:   { name: 'Baía Mansa', desc: 'fundo suave: ondas cheias para treinar', max: 1.5, types: ['cheia', 'pico', 'ponta', 'beira', 'surgente'], mult: 0.75, hAdd: -0.25, zAdd: 15, zMax: 195, shB: 0 },
   recife: { name: 'Recife da Laje', desc: 'pedra rasa: tubos grossos e rápidos', max: 3.0, types: ['laje', 'cunha', 'direita', 'esquerda', 'dupla', 'pico'], mult: 1.15, hAdd: 0.2, zAdd: -8, zMax: 195, shB: 0.1 },
   ponta:  { name: 'Ponta do Molhe', desc: 'promontório e molhe: paredes longas', max: 2.5, types: ['ponta', 'cunha', 'direita', 'esquerda'], mult: 1, hAdd: 0, zAdd: 5, zMax: 195, shB: 0 },
-  canhao: { name: 'Canhão', desc: 'um cânion no fundo junta a energia: ondas gigantes', max: 5.0, types: ['pico', 'dupla', 'fora', 'fechadeira', 'laje'], mult: 1.6, hAdd: 0.1, zAdd: 25, zMax: 222, shB: 0.45 }
+  canhao: { name: 'Canhão', desc: 'um cânion no fundo junta a energia: ondas gigantes', max: 5.0, types: ['pico', 'dupla', 'fora', 'fechadeira', 'laje'], mult: 1.6, hAdd: 0.1, zAdd: 25, zMax: 205, shB: 0.45 }   // quebra a 205 m: a onda nasce a 260 m e só termina de crescer aos 210 m
 };
 const BEACH_KEYS = Object.keys(BEACHES);
 if (!CFG.types || typeof CFG.types !== 'object') CFG.types = {};
@@ -445,7 +445,10 @@ function updateWaves() {
     wU[i].set(w.zc, w.mult, w.ph2, w.land);
     bU[i].set(w.x0, w.e, w.mode, w.eShore);
     cU[i].set(w.vp, w.dir, w.hollow, w.shoreW);
-    dU[i].set(w.peak, w.pw, w.shB, 0);
+    // onda maior é mais comprida (período maior), então a frente fica tão inclinada quanto a de uma onda normal.
+    // Antes toda onda tinha a mesma largura: a de 30 m virava parede de 81° e a água subia a 50 m/s ("foguete").
+    w.kF = 1 + Math.max(0, mult - 1.3) * 0.55;
+    dU[i].set(w.peak, w.pw, w.shB, w.kF);
   }
 }
 function brokenAge(w, x) {
@@ -467,17 +470,25 @@ function waveAt(x, z, out = _wo) {
     const appr = clamp((Z0 - z) / 50, 0, 1);
     const shoal = clamp((250 - z) / 150 + (w.shB || 0), 0, 1);
     let amp = (1.3 + 2.4 * shoal * shoal) * appr;
-    const pre = smooth(-3, 0, a);
-    const post = smooth(w.land * 0.9 * hc, w.land + 2.5, a);
+    // onda gigante: empina bem antes e desaba devagar (tudo proporcional ao tamanho). Antes ela ia de rampa de 36 m a
+    // parede de 7 m em 1,6 s e de 22 m a 4 m em 3 s: a água "se deformava toda" na hora da quebra. Ondas normais (kF = 1) iguais.
+    const kF = w.kF || 1, kB = Math.min(kF, 3), sk = Math.sqrt(kF);
+    const pre = smooth(-3 * sk, 0, a);
+    const post = smooth(w.land * 0.9 * hc, w.land + 2.5 * sk, a);
     amp *= 1 - 0.62 * post;
     amp *= smooth(SHORE - (w.shoreW < 5 ? 2 : 0), SHORE + w.shoreW, z);
     let lat = 0.85 + 0.15 * Math.sin(x * 0.03 + w.ph2);
     if (w.peak) { const q = (x - w.x0) / w.pw; lat *= lerp(1, 0.45 + 0.75 * Math.exp(-q * q), w.peak); }   // energia concentrada num pico
-    const A = amp * w.mult * lat;
-    let wf = lerp(9, 3.4, Math.max(shoal * 0.55, pre));
+    let A = amp * w.mult * lat;
+    // depois de quebrar, a água branca é limitada pela profundidade (~metade do fundo): a espuma de uma onda gigante
+    // não segue como um morro de 11 m até a praia. Ondas normais já ficam abaixo desse limite.
+    const capK = smooth(w.land * 0.9, w.land + 2.5 + 1.5 * (kF - 1), a);   // a montanha de espuma baixa ao longo de dezenas de metros
+    if (capK > 0) A = lerp(A, Math.min(A, 0.55 * Math.max(0.5, -terrainH(x, w.zc)) + 0.8), capK);
+    const kE = lerp(kF, Math.max(1, kF * 0.4), pre);        // a frente vai encurtando enquanto empina (costas: kB, até 3×)
+    let wf = lerp(9, 3.4, Math.max(shoal * 0.55, pre)) * kE;
     wf = lerp(wf, Math.max(0.9, 0.32 * A / (0.6 + 0.4 * hl)), smooth(0, w.land * 0.6, a) * (1 - post) * hc);   // parede quase vertical sob o lábio
-    wf = lerp(wf, 6.5, post);
-    const d = z - w.zc; const ww = d < 0 ? wf : 14;
+    wf = lerp(wf, 6.5 * kE, post);
+    const d = z - w.zc; const ww = d < 0 ? wf : 14 * kB;
     h += A * Math.exp(-(d * d) / (ww * ww));
     // explosão: a água sobe onde o lábio cai
     // água branca onde o lábio cai: uma elevação baixa, larga e coberta de espuma (o salto da água é feito
@@ -488,7 +499,8 @@ function waveAt(x, z, out = _wo) {
     const brS = w.land * 0.85 * hc;
     const br = smooth(brS, brS + 0.6, a);                          // espuma só depois que o lábio bate na água
     const fz = br * clamp(A / 1.5, 0, 1);
-    foam += impF * 1.3 + fz * (Math.exp(-((d + 1) * (d + 1)) / 12) + 0.7 * Math.exp(-((d - 5) * (d - 5)) / 60))
+    const dk = d / Math.sqrt(kF);                             // a faixa de espuma cresce menos que a onda
+    foam += impF * 1.3 + fz * (Math.exp(-((dk + 1) * (dk + 1)) / 12) + 0.7 * Math.exp(-((dk - 5) * (dk - 5)) / 60))
       + pre * (1 - br) * 0.35 * Math.exp(-(d * d) / 2) * clamp(A / 3, 0, 1)
       + (1 - hc) * smooth(0, 0.6, a) * (1 - 0.5 * post) * 1.1 * Math.exp(-((d + 0.6) * (d + 0.6)) / 2.5);   // onda cheia esfarela pela crista
   }
@@ -556,17 +568,21 @@ void waveAt(vec2 p, out float h, out float foam){
     float appr=clamp((Z0-z)/50.0,0.0,1.0);
     float shoal=clamp((250.0-z)/150.0+dd.z,0.0,1.0);
     float amp=(1.3+2.4*shoal*shoal)*appr;
-    float pre=smoothstep(-3.0,0.0,a);
-    float post=smoothstep(w.w*0.9*hc,w.w+2.5,a);
+    float kF=max(dd.w,1.0), kB=min(kF,3.0), sk=sqrt(kF);
+    float pre=smoothstep(-3.0*sk,0.0,a);
+    float post=smoothstep(w.w*0.9*hc,w.w+2.5*sk,a);
     amp*=1.0-0.62*post;
     amp*=smoothstep(SHORE-(c.w<5.0?2.0:0.0),SHORE+c.w,z);
     float lat=0.85+0.15*sin(x*0.03+w.z);
     if(dd.x>0.0){ float q=(x-b.x)/dd.y; lat*=mix(1.0,0.45+0.75*exp(-q*q),dd.x); }
     float A=amp*w.y*lat;
-    float wf=mix(9.0,3.4,max(shoal*0.55,pre));
+    float capK=smoothstep(w.w*0.9,w.w+2.5+1.5*(kF-1.0),a);
+    if(capK>0.0) A=mix(A,min(A,0.55*max(0.5,-terrainH(vec2(x,w.x)))+0.8),capK);
+    float kE=mix(kF,max(1.0,kF*0.4),pre);
+    float wf=mix(9.0,3.4,max(shoal*0.55,pre))*kE;
     wf=mix(wf,max(0.9,0.32*A/(0.6+0.4*hl)),smoothstep(0.0,w.w*0.6,a)*(1.0-post)*hc);
-    wf=mix(wf,6.5,post);
-    float d=z-w.x; float ww = d<0.0 ? wf : 14.0;
+    wf=mix(wf,6.5*kE,post);
+    float d=z-w.x; float ww = d<0.0 ? wf : 14.0*kB;
     h+=A*exp(-(d*d)/(ww*ww));
     float imp=smoothstep(w.w*0.85,w.w+0.4,a)*(1.0-smoothstep(w.w+0.4,w.w+2.2,a))*hc;
     float impF=0.0;
@@ -574,7 +590,8 @@ void waveAt(vec2 p, out float h, out float foam){
     float brS=w.w*0.85*hc;
     float br=smoothstep(brS,brS+0.6,a);
     float fz=br*clamp(A/1.5,0.0,1.0);
-    foam+=impF*1.3+fz*(exp(-((d+1.0)*(d+1.0))/12.0)+0.7*exp(-((d-5.0)*(d-5.0))/60.0))
+    float dk=d/sqrt(kF);
+    foam+=impF*1.3+fz*(exp(-((dk+1.0)*(dk+1.0))/12.0)+0.7*exp(-((dk-5.0)*(dk-5.0))/60.0))
       + pre*(1.0-br)*0.35*exp(-(d*d)/2.0)*clamp(A/3.0,0.0,1.0)
       + (1.0-hc)*smoothstep(0.0,0.6,a)*(1.0-0.5*post)*1.1*exp(-((d+0.6)*(d+0.6))/2.5);
   }
@@ -856,9 +873,9 @@ function updateLips() {
       const hl = hollowAt(w, x), hc = Math.min(hl, 1);
       const H = waveAt(x, w.zc, _lw).h;
       const sw = smooth(0.05, 0.4, hl) * smooth(0.9, 1.6, H) * zW * (1 - smooth(148, 158, Math.abs(x)));
-      const grow = smooth(-0.9, 0.1, a);                      // crista se inclinando antes de quebrar
+      const grow = smooth(-0.9 * Math.sqrt(w.kF || 1), 0.1, a);   // crista se inclinando antes de quebrar (a gigante começa antes)
       const g8 = sw * grow;
-      if (sw < 0.001 || a < -0.9 || a > land + 0.5 + 0.05 * H) {
+      if (sw < 0.001 || a < -0.9 * Math.sqrt(w.kF || 1) || a > land + 0.5 + 0.05 * H) {
         // fora da quebra: o lábio inteiro vira um ponto escondido na crista (o mesmo limite de g8 → 0)
         for (let r = 0; r < LIP_RING; r++) { const j = (base + r) * 3; pos[j] = x; pos[j + 1] = H - 0.05; pos[j + 2] = w.zc; al[base + r] = 0; fo[base + r] = 0; }
         continue;
@@ -874,7 +891,8 @@ function updateLips() {
          do lábio, então face → parede do tubo → lábio é uma superfície só. */
       let uF = 2.5;                                           // ponto da face com ~50% da altura
       // interpolado entre as amostras para variar contínuo (em degraus de 0,2 m ele pulava)
-      for (let q = 0.2, hPrev = H; q < 3; q += 0.2) { const hq = waveAt(x, w.zc - q, _lw).h; if (hq < H * 0.5) { uF = q - 0.2 + 0.2 * clamp((hPrev - H * 0.5) / Math.max(hPrev - hq, 1e-4), 0, 1); break; } hPrev = hq; }
+      const qs = 0.2 * (w.kF || 1), qMax = 3 * (w.kF || 1); uF = 2.5 * (w.kF || 1);
+      for (let q = qs, hPrev = H; q < qMax; q += qs) { const hq = waveAt(x, w.zc - q, _lw).h; if (hq < H * 0.5) { uF = q - qs + qs * clamp((hPrev - H * 0.5) / Math.max(hPrev - hq, 1e-4), 0, 1); break; } hPrev = hq; }
       const u3 = L * (0.22 + 0.73 * p);                       // ponta: velocidade horizontal constante
       const yLand = waveAt(x, w.zc - u3 * g8, _lw).h + 0.05;
       const y3 = lerp(H * 0.9, yLand, p * p);                 // ponta: queda livre (parábola)
