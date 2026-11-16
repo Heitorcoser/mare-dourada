@@ -50,6 +50,18 @@ canvas#c{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
 #hint{bottom:calc(22px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);font-size:16px;font-weight:600;text-align:center;max-width:min(92vw,620px);text-shadow:0 1px 6px rgba(0,0,0,.45)}
 #hint b{font-family:var(--display);font-weight:400;color:#ffd166;letter-spacing:.04em}
 #wave{bottom:calc(96px + env(safe-area-inset-bottom,0px));white-space:nowrap;left:50%;transform:translateX(-50%);font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--sand);font-weight:700;text-shadow:0 1px 6px rgba(0,0,0,.5)}
+#net{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;padding:4px 9px;border-radius:999px;background:var(--ink-soft);color:var(--sand)}
+#net.on{color:var(--sea)}
+#players{display:flex;flex-direction:column;gap:3px;min-width:190px;max-width:260px;font-size:13px}
+#players .ph{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--sand);font-weight:700;margin-bottom:2px}
+#players .pr{display:flex;justify-content:space-between;gap:10px}
+#players .pr span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+#players .pr.me span:first-child{color:var(--sea)}
+#players .pm{color:var(--sand);opacity:.85;white-space:nowrap;font-variant-numeric:tabular-nums}
+#feed{left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(64px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:4px;max-width:min(70vw,360px)}
+#feed .fd{background:var(--ink-soft);border-radius:10px;padding:5px 10px;font-size:13px;font-weight:600;animation:fd 6s ease-out forwards}
+@keyframes fd{0%{opacity:0;transform:translateX(-10px)}6%{opacity:1;transform:none}85%{opacity:1}100%{opacity:0}}
+@media (max-width:640px){#players{display:none!important}#feed{bottom:calc(250px + env(safe-area-inset-bottom,0px))}}
 #pops{top:30%;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px}
 .pop{font-family:var(--display);font-size:clamp(22px,4vw,40px);color:#ffd166;text-shadow:0 3px 0 rgba(15,34,48,.6),0 0 24px rgba(255,122,89,.5);animation:pop 1.7s ease-out forwards;white-space:nowrap}
 .pop small{display:block;text-align:center;font-family:var(--body);font-size:15px;font-weight:700;color:var(--foam);letter-spacing:.1em}
@@ -128,6 +140,8 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div id="speed" class="panel"><span class="v" id="spd">0</span><span class="u">KM/H</span></div>
     <span id="mode">Na areia</span>
     <span id="tide" class="tide"></span>
+    <span id="net" hidden>Conectando…</span>
+    <div id="players" class="panel" hidden></div>
     <div class="tools">
       <button id="bTime" type="button">Meio-dia (T)</button>
       <button id="bSound" type="button">Som: ligado (M)</button>
@@ -143,12 +157,15 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div><kbd>Mouse</kbd> girar a câmera · <kbd>Roda</kbd> zoom</div>
     <div>No mar: <kbd>W</kbd> remar, <kbd>A</kbd>/<kbd>D</kbd> virar</div>
     <div><kbd>Espaço</kbd> ficar de pé na onda</div>
+    <div>Remando para o fundo: <kbd>Espaço</kbd> = duck dive (segure para ficar embaixo)</div>
+    <div>Na vaca: <kbd>W</kbd> nada para cima</div>
     <div>Surfando: <kbd>A</kbd>/<kbd>D</kbd> cavar, <kbd>W</kbd> bombear</div>
     <div><kbd>Espaço</kbd> subindo a parede = aéreo, gire com <kbd>A</kbd>/<kbd>D</kbd></div>
     <div><kbd>R</kbd> voltar para a areia</div>
   </div>
 
   <div id="pops" class="hud"></div>
+  <div id="feed" class="hud" aria-live="polite"></div>
   <div id="wave" class="hud"></div>
   <div id="hint" class="hud"></div>
 
@@ -191,6 +208,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
         <output id="waveVal">1,0×</output>
       </div>
       <p class="note" id="waveInfo"></p>
+      <p class="note" id="hostNote" hidden>No multiplayer o mar é o mesmo para todos: quem escolhe o tamanho e os tipos de onda é o anfitrião (★, quem entrou primeiro).</p>
       <div class="typebox" role="group" aria-label="Tipos de onda" style="display:flex;flex-direction:column;gap:6px">
         <span class="sub">Tipos de onda que podem entrar</span>
         <div class="chips" id="typeChips"></div>
@@ -209,6 +227,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
         <div><kbd>WASD</kbd><span>andar e remar</span></div>
         <div><kbd>E</kbd><span>pegar a prancha</span></div>
         <div><kbd>Espaço</kbd><span>ficar de pé / aéreo</span></div>
+        <div><kbd>Espaço</kbd><span>furar a onda (duck dive)</span></div>
         <div><kbd>A / D</kbd><span>cavar na parede</span></div>
         <div><kbd>Mouse</kbd><span>olhar em volta</span></div>
         <div><kbd>T</kbd><span>mudar a hora do dia</span></div>
@@ -266,7 +285,19 @@ const WTYPES = {
   fechadeira: { name: 'Fechadeira', desc: 'fecha tudo de uma vez',     mode: 1, dir: 0,  vp: 99,  hollow: 0.9, zOff: -6,  size: 1.0 },
   cheia:      { name: 'Cheia',      desc: 'quebra mole, sem tubo',     mode: 0, dir: 0,  vp: 6.0, hollow: 0.0, zOff: 18,  size: 0.9 },
   laje:       { name: 'Laje',       desc: 'tubo grosso e muito rápido', mode: 2, dir: 0, vp: 11,  hollow: 1.5, zOff: -14, size: 1.2 },
-  beira:      { name: 'Beira',      desc: 'onda média que quebra na areia', mode: 1, dir: 0, vp: 99, hollow: 1.1, zAbs: 17, size: 0.55, shoreW: 3.5 }
+  beira:      { name: 'Beira',      desc: 'onda média que quebra na areia', mode: 1, dir: 0, vp: 99, hollow: 1.1, zAbs: 17, size: 0.55, shoreW: 3.5 },
+  /* Tipos novos, pela física de quebra (número de Iribarren ξ = tanβ/√(H/L0): derrama < 0,5 < mergulha < 3,3 < sobe a praia)
+     e pela forma do fundo:
+     - Ponta (point break): a ondulação contorna um promontório e abre devagar e comprida, sempre do mesmo lado.
+     - Dupla (double-up): duas ondas se somam (interferência construtiva); a energia junta quebra num fundo raso: grossa e oca.
+     - Cunha (wedge): a onda refletida no molhe de pedra cruza a seguinte e soma; nasce um pico alto e estreito colado nas pedras.
+     - De fora (sneaker set): a onda rara bem maior da série, que quebra muito mais para fora e pega todo mundo "dentro".
+     - Surgente: ondulação longa num fundo íngreme (ξ alto): a base sobe a areia inteira sem formar crista quebrando. */
+  ponta:      { name: 'Ponta',      desc: 'abre longa e devagar do promontório', mode: 2, dir: 0, vp: 5.5, hollow: 0.85, zOff: 12, size: 1.0, x0Abs: 135 },
+  dupla:      { name: 'Dupla',      desc: 'duas ondas somadas: grossa e oca', mode: 0, dir: 0, vp: 10, hollow: 1.35, zOff: -10, size: 1.4, peak: 0.45, pw: 30, weight: 0.6 },
+  cunha:      { name: 'Cunha',      desc: 'pico alto e estreito colado no molhe', mode: 0, dir: 0, vp: 6.0, hollow: 1.25, zOff: -16, size: 1.15, peak: 1.0, pw: 16, x0Abs: 122, weight: 0.7 },
+  fora:       { name: 'De fora',    desc: 'a bomba rara que quebra lá fora', mode: 0, dir: 0, vp: 9.0, hollow: 1.0, zOff: 38, size: 1.75, weight: 0.35 },
+  surgente:   { name: 'Surgente',   desc: 'sobe a areia sem quebrar', mode: 1, dir: 0, vp: 99, hollow: 0.0, zAbs: 13, size: 0.6, shoreW: 3.0, swash: 1.7, weight: 0.7 }
 };
 const TYPE_KEYS = Object.keys(WTYPES);
 if (!CFG.types || typeof CFG.types !== 'object') CFG.types = {};
@@ -289,23 +320,46 @@ function updateLevel(dt = 0.016) {
   for (const w of W) if (w.e > 0 && w.zc > SHORE - 10) hb = Math.max(hb, w.height * (1 - 0.5 * smooth(0, 12, w.e)));
   const setupT = 0.35 * BETA * Math.sqrt(Math.max(hb, 0.3) * L0) * 0.8;
   SETUP = lerp(SETUP, setupT, 1 - Math.exp(-dt / 6));
-  // onda longa ligada às séries: a água baixa por baixo do grupo grande que chega e sobe depois que ele quebra
+  // onda longa ligada às séries: a água baixa por baixo do grupo grande que chega e sobe depois que ele quebra.
+  // Soma 5 ondas (não só as 3 desenhadas): a mais velha só sai da conta quando já está a 200 m atrás da areia,
+  // com peso zero. Antes ela saía com zc ≈ -32 m, no meio da gaussiana, e o nível pulava até 0,3 m a cada 13 s.
+  const N = Math.floor(T / P);
   let ig = 0;
-  for (const w of W) {
-    const E = Math.pow(Math.max(w.height, 0.5) / 3.7, 1.5) * (w.type === 'cheia' ? 0.6 : 1);
-    ig += -0.3 * E * Math.exp(-Math.pow((w.zc - 70) / 28, 2));
-    ig += 0.3 * E * Math.exp(-Math.pow((w.zc + 12) / 22, 2));
+  for (let j = 0; j < 5; j++) {
+    const p = waveParams(N - j), zc = Z0 - C * (T - p.n * P);
+    const E = Math.pow(Math.max(p.height, 0.5) / 3.7, 1.5) * (p.type === 'cheia' ? 0.6 : 1);
+    ig += -0.3 * E * Math.exp(-Math.pow((zc - 70) / 28, 2));
+    ig += 0.3 * E * Math.exp(-Math.pow((zc + 12) / 22, 2));
   }
   LEVEL = clamp(TIDE + SETUP + ig, -0.9, 1.4);
-  // espraiamento de cada onda
+  // espraiamento de cada onda: a língua só começa 32,5 s depois da onda nascer e dura até ~22 s, então os
+  // espaços seguem as ondas N-2, N-3 e N-4 (cada língua vai até o fim, em vez de sumir quando a onda saía da lista)
   for (let i = 0; i < 3; i++) {
-    const w = W[i];
-    const tA = w.n * P + (Z0 - (SHORE + 4)) / C;                            // hora em que a espuma chega na beira
-    const k = w.type === 'cheia' ? 0.8 : w.type === 'beira' ? 1.15 : 1;
-    w.Rh = clamp(0.375 * Math.sqrt(Math.max(w.height, 0.5) * L0) * k * 0.85, 3, 24);   // alcance horizontal
-    w.tau = T - tA; w.th = 0.1 + 0.035 * w.height;
-    sU[i].set(w.tau, w.Rh, w.th, w.ph2);
+    const p = waveParams(N - 2 - i), s = SW[i];
+    const tA = p.n * P + (Z0 - (SHORE + 4)) / C;                            // hora em que a espuma chega na beira
+    const k = p.ty.swash || (p.type === 'cheia' ? 0.8 : p.type === 'beira' ? 1.15 : 1);
+    s.n = p.n; s.ph2 = p.ph2;
+    s.Rh = clamp(0.375 * Math.sqrt(Math.max(p.height, 0.5) * L0) * k * 0.85, 3, 24);   // alcance horizontal
+    s.tau = T - tA; s.th = 0.1 + 0.035 * p.height;
+    sU[i].set(s.tau, s.Rh, s.th, s.ph2);
   }
+}
+const SW = [{ Rh: 3, tau: -1, th: 0, ph2: 0 }, { Rh: 3, tau: -1, th: 0, ph2: 0 }, { Rh: 3, tau: -1, th: 0, ph2: 0 }];
+/* Cada onda guarda o tamanho e o tipo do momento em que nasceu. Assim, mexer nos Ajustes muda só as
+   próximas ondas (antes as ondas já no mar mudavam de altura na hora, outro "teleporte"). */
+const WCACHE = new Map();
+function waveParams(n) {
+  let p = WCACHE.get(n);
+  if (p) return p;
+  const set = (((n % 4) + 4) % 4) === 0;
+  const type = pickType(n, set), ty = WTYPES[type];
+  let mult = 0.75 + 0.5 * hash1(n);
+  if (set) mult *= 1.35;
+  mult *= ty.size * waveCfg().ws;
+  p = { n, set, type, ty, mult, height: 3.7 * mult, ph2: ((n * 1.3) % TAU + TAU) % TAU };
+  WCACHE.set(n, p);
+  if (WCACHE.size > 40) for (const k of [...WCACHE.keys()]) if (k < n - 12) WCACHE.delete(k);
+  return p;
 }
 function swashFront(w, x, o) {
   const cusp = 1 + 0.2 * Math.sin(x * 0.21 + w.ph2) + 0.1 * Math.sin(x * 0.057 + w.ph2 * 2);   // cúspides de praia
@@ -319,28 +373,33 @@ const W = [{}, {}, {}];
 const wU = [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()];
 const bU = [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()];
 const cU = [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()];
+const dU = [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()];   // pico concentrado (cunha, dupla)
 function pickType(n, set) {
-  const on = TYPE_KEYS.filter(k => CFG.types[k]); const pool = on.length ? on : ['pico'];
+  const types = waveCfg().types;
+  const on = TYPE_KEYS.filter(k => types[k]); const pool = on.length ? on : ['pico'];
   let p = pool;
   if (set) { const hol = pool.filter(k => WTYPES[k].hollow >= 1 && !WTYPES[k].zAbs); if (hol.length) p = hol; }
-  return p[Math.floor(hash1(n + 77.7) * p.length) % p.length];
+  // sorteio com peso (a "de fora" é rara), igual em todos os jogadores porque só depende de n
+  let tot = 0; for (const k of p) tot += WTYPES[k].weight || 1;
+  let r = hash1(n + 77.7) * tot;
+  for (const k of p) { r -= WTYPES[k].weight || 1; if (r < 0) return k; }
+  return p[p.length - 1];
 }
 function updateWaves() {
   const N = Math.floor(T / P);
   for (let i = 0; i < 3; i++) {
     const n = N - i;
-    const set = (((n % 4) + 4) % 4) === 0;
-    const type = pickType(n, set), ty = WTYPES[type];
-    let mult = 0.75 + 0.5 * hash1(n);
-    if (set) mult *= 1.35;
-    mult *= ty.size * CFG.waveSize;
+    const wp = waveParams(n), set = wp.set, type = wp.type, ty = wp.ty, mult = wp.mult;
     const w = W[i];
     w.n = n; w.zc = Z0 - C * (T - n * P); w.mult = mult; w.set = set; w.type = type;
-    w.ph2 = ((n * 1.3) % TAU + TAU) % TAU;
+    w.ph2 = wp.ph2;
     w.mode = ty.mode; w.vp = ty.vp; w.hollow = ty.hollow;
     w.dir = ty.mode === 2 ? (ty.dir || (hash1(n + 5.5) < 0.5 ? -1 : 1)) : 0;
     w.close = ty.mode === 1 ? 1 : 0;
-    w.x0 = ty.mode === 2 ? -w.dir * (55 + hash1(n + 13.1) * 40) : (hash1(n + 13.1) - 0.5) * 140;
+    const side = hash1(n + 21.7) < 0.5 ? -1 : 1;
+    w.x0 = ty.x0Abs ? (ty.mode === 2 ? -w.dir * ty.x0Abs : side * ty.x0Abs) * (0.92 + 0.08 * hash1(n + 13.1))
+      : ty.mode === 2 ? -w.dir * (55 + hash1(n + 13.1) * 40) : (hash1(n + 13.1) - 0.5) * 140;
+    w.peak = ty.peak || 0; w.pw = ty.pw || 30;
     w.zBreak = ty.zAbs ? ty.zAbs : clamp(80 + 24 * mult + ty.zOff, 60, 195);   // longe da areia; onda maior quebra mais para trás
     w.shoreW = ty.shoreW || 14;
     w.height = 3.7 * mult;
@@ -350,6 +409,7 @@ function updateWaves() {
     wU[i].set(w.zc, w.mult, w.ph2, w.land);
     bU[i].set(w.x0, w.e, w.mode, w.eShore);
     cU[i].set(w.vp, w.dir, w.hollow, w.shoreW);
+    dU[i].set(w.peak, w.pw, 0, 0);
   }
 }
 function brokenAge(w, x) {
@@ -359,7 +419,9 @@ function brokenAge(w, x) {
   else spread = Math.abs(dx) / w.vp;
   return Math.max(w.e - spread, w.eShore);
 }
-function hollowAt(w, x) { return (w.mode === 2 && (x - w.x0) * w.dir < 0) ? 0 : w.hollow; }
+// lado "morto" de uma direita/esquerda: a transição para a parte oca dura 10 m (antes era um degrau no pico,
+// e a altura da parede mudava de uma coluna da malha para a outra)
+function hollowAt(w, x) { return w.mode === 2 ? w.hollow * smooth(-10, 0, (x - w.x0) * w.dir) : w.hollow; }
 const _wo = { h: 0, foam: 0 };
 function waveAt(x, z, out = _wo) {
   let h = 0, foam = 0;
@@ -373,7 +435,8 @@ function waveAt(x, z, out = _wo) {
     const post = smooth(w.land * 0.9 * hc, w.land + 2.5, a);
     amp *= 1 - 0.62 * post;
     amp *= smooth(SHORE - (w.shoreW < 5 ? 2 : 0), SHORE + w.shoreW, z);
-    const lat = 0.85 + 0.15 * Math.sin(x * 0.03 + w.ph2);
+    let lat = 0.85 + 0.15 * Math.sin(x * 0.03 + w.ph2);
+    if (w.peak) { const q = (x - w.x0) / w.pw; lat *= lerp(1, 0.45 + 0.75 * Math.exp(-q * q), w.peak); }   // energia concentrada num pico
     const A = amp * w.mult * lat;
     let wf = lerp(9, 3.4, Math.max(shoal * 0.55, pre));
     wf = lerp(wf, Math.max(0.9, 0.32 * A / (0.6 + 0.4 * hl)), smooth(0, w.land * 0.6, a) * (1 - post) * hc);   // parede quase vertical sob o lábio
@@ -381,12 +444,15 @@ function waveAt(x, z, out = _wo) {
     const d = z - w.zc; const ww = d < 0 ? wf : 14;
     h += A * Math.exp(-(d * d) / (ww * ww));
     // explosão: a água sobe onde o lábio cai
-    const imp = smooth(w.land * 0.9, w.land + 0.15, a) * (1 - smooth(w.land + 0.25, w.land + 1.3, a)) * hc;
-    if (imp > 0.001) { const du = d + 1.25 * A * (0.75 + 0.25 * hl); const s = 0.35 * A + 0.6; h += A * 0.42 * imp * Math.exp(-(du * du) / (s * s)); }
+    // água branca onde o lábio cai: uma elevação baixa, larga e coberta de espuma (o salto da água é feito
+    // pelas partículas). Antes era um morro sólido de 0,42·A, estreito, que virava uma "tenda" na faixa do impacto.
+    const imp = smooth(w.land * 0.85, w.land + 0.4, a) * (1 - smooth(w.land + 0.4, w.land + 2.2, a)) * hc;
+    let impF = 0;
+    if (imp > 0.001) { const du = d + 1.25 * A * (0.75 + 0.25 * hl); const s = 0.55 * A + 1.6; impF = imp * Math.exp(-(du * du) / (s * s)); h += A * 0.14 * impF; }
     const brS = w.land * 0.85 * hc;
     const br = smooth(brS, brS + 0.6, a);                          // espuma só depois que o lábio bate na água
     const fz = br * clamp(A / 1.5, 0, 1);
-    foam += fz * (Math.exp(-((d + 1) * (d + 1)) / 12) + 0.7 * Math.exp(-((d - 5) * (d - 5)) / 60))
+    foam += impF * 1.3 + fz * (Math.exp(-((d + 1) * (d + 1)) / 12) + 0.7 * Math.exp(-((d - 5) * (d - 5)) / 60))
       + pre * (1 - br) * 0.35 * Math.exp(-(d * d) / 2) * clamp(A / 3, 0, 1)
       + (1 - hc) * smooth(0, 0.6, a) * (1 - 0.5 * post) * 1.1 * Math.exp(-((d + 0.6) * (d + 0.6)) / 2.5);   // onda cheia esfarela pela crista
   }
@@ -396,7 +462,7 @@ function waveAt(x, z, out = _wo) {
   if (z < SHORE + 12) {                                         // língua de água subindo e descendo a areia
     const ter = terrainH(x, z);
     for (let i = 0; i < 3; i++) {
-      const zf = swashFront(W[i], x, _sw); if (zf > 500 || z < zf - 0.5) continue;
+      const zf = swashFront(SW[i], x, _sw); if (zf > 500 || z < zf - 0.5) continue;
       if (Math.abs(x) > 158 || ter > (SHORE + 2 - zf) * BETA + 0.6) continue;     // só na areia da praia
       const prof = Math.sqrt(clamp((z - zf) / 4, 0, 1));
       const hs = ter + _sw.th * prof + LEVEL * 0.15;
@@ -418,6 +484,7 @@ uniform float uTime;
 uniform vec4 uW[3];
 uniform vec4 uB[3];
 uniform vec4 uC[3];
+uniform vec4 uD[3];
 uniform float uLevel;
 uniform vec4 uS[3];
 const float SHORE = 12.0;
@@ -442,13 +509,13 @@ float swashFront(vec4 s, float x, out float up, out float u, out float th, out f
 void waveAt(vec2 p, out float h, out float foam){
   float x=p.x, z=p.y; h=0.0; foam=0.0;
   for(int i=0;i<3;i++){
-    vec4 w=uW[i]; vec4 b=uB[i]; vec4 c=uC[i];
+    vec4 w=uW[i]; vec4 b=uB[i]; vec4 c=uC[i]; vec4 dd=uD[i];
     float dx=x-b.x; float spread;
     if(b.z>1.5){ float s=dx*c.y; spread = s>=0.0 ? s/c.x : -s*0.03; }
     else if(b.z>0.5){ spread=abs(dx)*0.012; }
     else { spread=abs(dx)/c.x; }
     float a=max(b.y-spread, b.w);
-    float hl = (b.z>1.5 && dx*c.y<0.0) ? 0.0 : c.z;
+    float hl = b.z>1.5 ? c.z*smoothstep(-10.0,0.0,dx*c.y) : c.z;
     float hc=min(hl,1.0);
     float appr=clamp((Z0-z)/50.0,0.0,1.0);
     float shoal=clamp((250.0-z)/150.0,0.0,1.0);
@@ -458,18 +525,20 @@ void waveAt(vec2 p, out float h, out float foam){
     amp*=1.0-0.62*post;
     amp*=smoothstep(SHORE-(c.w<5.0?2.0:0.0),SHORE+c.w,z);
     float lat=0.85+0.15*sin(x*0.03+w.z);
+    if(dd.x>0.0){ float q=(x-b.x)/dd.y; lat*=mix(1.0,0.45+0.75*exp(-q*q),dd.x); }
     float A=amp*w.y*lat;
     float wf=mix(9.0,3.4,max(shoal*0.55,pre));
     wf=mix(wf,max(0.9,0.32*A/(0.6+0.4*hl)),smoothstep(0.0,w.w*0.6,a)*(1.0-post)*hc);
     wf=mix(wf,6.5,post);
     float d=z-w.x; float ww = d<0.0 ? wf : 14.0;
     h+=A*exp(-(d*d)/(ww*ww));
-    float imp=smoothstep(w.w*0.9,w.w+0.15,a)*(1.0-smoothstep(w.w+0.25,w.w+1.3,a))*hc;
-    if(imp>0.001){ float du=d+1.25*A*(0.75+0.25*hl); float s=0.35*A+0.6; h+=A*0.42*imp*exp(-(du*du)/(s*s)); }
+    float imp=smoothstep(w.w*0.85,w.w+0.4,a)*(1.0-smoothstep(w.w+0.4,w.w+2.2,a))*hc;
+    float impF=0.0;
+    if(imp>0.001){ float du=d+1.25*A*(0.75+0.25*hl); float s=0.55*A+1.6; impF=imp*exp(-(du*du)/(s*s)); h+=A*0.14*impF; }
     float brS=w.w*0.85*hc;
     float br=smoothstep(brS,brS+0.6,a);
     float fz=br*clamp(A/1.5,0.0,1.0);
-    foam+=fz*(exp(-((d+1.0)*(d+1.0))/12.0)+0.7*exp(-((d-5.0)*(d-5.0))/60.0))
+    foam+=impF*1.3+fz*(exp(-((d+1.0)*(d+1.0))/12.0)+0.7*exp(-((d-5.0)*(d-5.0))/60.0))
       + pre*(1.0-br)*0.35*exp(-(d*d)/2.0)*clamp(A/3.0,0.0,1.0)
       + (1.0-hc)*smoothstep(0.0,0.6,a)*(1.0-0.5*post)*1.1*exp(-((d+0.6)*(d+0.6))/2.5);
   }
@@ -546,18 +615,24 @@ scene.add(sun); scene.add(sun.target);
 
 /* Água */
 const waterU = Object.assign({
-  uTime: { value: 0 }, uW: { value: wU }, uB: { value: bU }, uC: { value: cU }, uLevel: { value: 0 }, uS: { value: sU }, uDeep: { value: new THREE.Color() }, uShallow: { value: new THREE.Color() },
-  uFogColor: { value: new THREE.Color() }, uFogNear: { value: 140 }, uFogFar: { value: 900 }, uFar: { value: 0 }, uBase: { value: 0 }, uSparkle: { value: 1 }
+  uTime: { value: 0 }, uW: { value: wU }, uB: { value: bU }, uC: { value: cU }, uD: { value: dU }, uLevel: { value: 0 }, uS: { value: sU }, uDeep: { value: new THREE.Color() }, uShallow: { value: new THREE.Color() },
+  uFogColor: { value: new THREE.Color() }, uFogNear: { value: 140 }, uFogFar: { value: 900 }, uFar: { value: 0 }, uBase: { value: 0 }, uSparkle: { value: 1 }, uUnder: { value: 0 }
 }, skyU);
 function makeWaterMat(far) {
   const u = Object.assign({}, waterU, { uFar: { value: far ? 1 : 0 }, uBase: { value: far ? -0.05 : 0 } });
   return new THREE.ShaderMaterial({
-    uniforms: u, transparent: true, fog: false,
+    uniforms: u, transparent: true, fog: false, side: THREE.DoubleSide,   // face de baixo só aparece com a câmera submersa
     vertexShader: GLSL_COMMON + `
       uniform float uBase;
       varying vec3 vWorld; varying vec3 vN; varying float vFoam;
       void main(){
         vec3 wp=(modelMatrix*vec4(position,1.0)).xyz;
+        // puxa as linhas da malha para perto de cada crista (até 2,6× mais densas na parede). A parede tem ~1 m
+        // de largura e as linhas ficavam a ~1 m uma da outra: a crista "pulava" de linha em linha enquanto a onda andava.
+        // f(z) = z - 0.62·d·e^(-d²/36) é monotônica (0.62 < 1), então a malha nunca dobra.
+        float dzs=0.0;
+        for(int i=0;i<3;i++){ float d=wp.z-uW[i].x; dzs+=d*exp(-d*d/36.0); }
+        wp.z-=0.62*dzs;
         float h,f,hx,hz,t;
         waveAt(wp.xz,h,f); waveAt(wp.xz+vec2(0.4,0.0),hx,t); waveAt(wp.xz+vec2(0.0,0.4),hz,t);
         wp.y=h+uBase;
@@ -566,7 +641,7 @@ function makeWaterMat(far) {
         gl_Position=projectionMatrix*viewMatrix*vec4(wp,1.0);
       }`,
     fragmentShader: GLSL_COMMON + GLSL_SKY + `
-      uniform vec3 uDeep; uniform vec3 uShallow; uniform vec3 uFogColor; uniform float uFogNear; uniform float uFogFar; uniform float uFar; uniform float uSparkle;
+      uniform vec3 uDeep; uniform vec3 uShallow; uniform vec3 uFogColor; uniform float uFogNear; uniform float uFogFar; uniform float uFar; uniform float uSparkle; uniform float uUnder;
       varying vec3 vWorld; varying vec3 vN; varying float vFoam;
       float hash2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
       float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
@@ -575,6 +650,12 @@ function makeWaterMat(far) {
       float fbm(vec2 p){ float s=0.0, a=0.5; for(int i=0;i<4;i++){ s+=a*vnoise(p); p*=2.03; a*=0.5; } return s; }
       void main(){
         if(uFar>0.5 && abs(vWorld.x)<398.0 && vWorld.z<318.0) discard;
+        if(!gl_FrontFacing){
+          if(uUnder<0.5) discard;
+          // vista de baixo: a superfície como um teto claro e esverdeado, mais escuro com a distância
+          float dU=length(cameraPosition-vWorld);
+          gl_FragColor=vec4(mix(uShallow*1.15+vec3(0.08),uDeep*0.6,smoothstep(2.0,40.0,dU)),0.9); return;
+        }
         vec2 q=vWorld.xz;
         float n1=fbm(q*0.55+vec2(uTime*0.35,uTime*0.2));
         float n2=fbm(q*0.55+vec2(3.1,-uTime*0.3)+0.7);
@@ -646,7 +727,7 @@ const lipMat = new THREE.ShaderMaterial({
   vertexShader: `
     attribute float aS; attribute float aAlpha; attribute float aFoam; attribute float aIn;
     varying vec3 vWorld; varying vec3 vN; varying float vS; varying float vA; varying float vF; varying float vIn;
-    void main(){ vec4 wp=modelMatrix*vec4(position,1.0); vWorld=wp.xyz; vN=normalize(normal); vS=aS; vA=aAlpha; vF=aFoam; vIn=aIn;
+    void main(){ vec4 wp=modelMatrix*vec4(position,1.0); vWorld=wp.xyz; vN=dot(normal,normal)>1e-10 ? normalize(normal) : vec3(0.0,1.0,0.0); vS=aS; vA=aAlpha; vF=aFoam; vIn=aIn;
       gl_Position=projectionMatrix*viewMatrix*wp; }`,
   fragmentShader: GLSL_SKY + `
     uniform float uTime; uniform vec3 uDeep; uniform vec3 uShallow; uniform vec3 uFogColor; uniform float uFogNear; uniform float uFogFar;
@@ -654,20 +735,28 @@ const lipMat = new THREE.ShaderMaterial({
     float hash2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
     float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
       return mix(mix(hash2(i),hash2(i+vec2(1.0,0.0)),f.x),mix(hash2(i+vec2(0.0,1.0)),hash2(i+vec2(1.0,1.0)),f.x),f.y); }
+    float terrH(vec2 p){ float x=p.x, z=p.y; float y=max((12.0-z)*0.055,-7.0); y+=0.18*sin(x*0.045+0.5)*sin(z*0.06);
+      float dz=max(0.0,-z-35.0); y+=min(dz*0.04,2.0)*(0.7+0.3*sin(x*0.03)); return y; }
     void main(){
       if(vA<0.01) discard;
       vec3 V=normalize(cameraPosition-vWorld);
       vec3 n=normalize(vN); if(dot(n,V)<0.0) n=-n;
-      float fres=0.04+0.6*pow(1.0-max(dot(n,V),0.0),3.0);
+      // mesma receita de cor da água (profundidade, crista iluminada por trás, Fresnel, brilho do sol),
+      // para o lábio continuar a face em vez de parecer outro material por cima da onda
+      float fres=0.03+0.85*pow(1.0-max(dot(n,V),0.0),4.0);
       vec3 R=reflect(-V,n); R.y=abs(R.y);
-      float back=pow(max(dot(-V,uSunDir)*0.5+0.5,0.0),2.5);
-      float thin=smoothstep(0.25,1.0,vS);
-      vec3 inner=mix(uDeep*0.95,uShallow*0.9,0.25+0.4*thin);
-      vec3 outer=mix(uDeep*1.05,uShallow*1.25,0.35+0.5*thin);
-      vec3 base=mix(outer,inner,vIn)+uShallow*thin*(0.2+0.35*back)+uSunColor*back*0.08*thin;
-      vec3 col=mix(base,skyCol(R),fres*(1.0-0.5*vIn));
+      float depth=vWorld.y-terrH(vWorld.xz);
+      vec3 base=mix(uShallow,uDeep,smoothstep(0.4,7.0,depth));
+      float crest=clamp(vWorld.y*0.4,0.0,1.0);
+      float back=pow(max(dot(-V,uSunDir)*0.5+0.5,0.0),3.0);
+      base+=uShallow*crest*(0.35+0.9*back);
+      float thin=smoothstep(0.55,1.0,vS);
+      base+=uShallow*thin*0.25*back;                       // ponta fina: a luz atravessa
+      base*=mix(1.0,0.82,vIn*(1.0-thin));                  // dentro do tubo: sombra
+      vec3 col=mix(base,skyCol(R),fres);
+      col+=uSunColor*pow(max(dot(R,uSunDir),0.0),220.0)*2.2;
       float streak=vnoise(vec2(vWorld.x*0.9,vS*9.0-uTime*3.0));
-      col+=vec3(0.9,1.0,1.0)*smoothstep(0.72,0.95,streak)*0.12*(1.0-vS);
+      col+=vec3(0.9,1.0,1.0)*smoothstep(0.75,0.95,streak)*0.06*(1.0-vS);
       float nz=vnoise(vec2(vWorld.x*0.7,vS*7.0-uTime*2.2))*0.6+vnoise(vWorld.xz*1.6+uTime)*0.4;
       float foam=smoothstep(0.35,0.8,vF*(0.55+nz));
       col=mix(col,vec3(0.97,0.95,0.91)*(0.85+0.15*back),foam);
@@ -714,46 +803,67 @@ function updateLips() {
     const pos = g.attributes.position.array, al = g.attributes.aAlpha.array, fo = g.attributes.aFoam.array;
     const land = w.land;
     let any = false;
+    /* Cada coluna segue as fases de uma onda mergulhante de verdade, todas contínuas no tempo e no espaço:
+       1) empinamento (a < 0): a crista fica assimétrica e começa a se inclinar para a frente;
+       2) arremesso (0 < a < land): o lábio sai da crista com a velocidade da onda e cai em queda livre (parábola);
+       3) colapso (a > land): o lábio bate na base, vira espuma e afunda dentro da água branca.
+       Antes, uma coluna "desligada" virava um ponto e o triângulo até a vizinha esticava como membrana
+       (as "tendas" na foto), e o lábio caído ficava achatado em cima da água como uma placa branca.
+       Agora uma coluna fora da quebra só encolhe o lábio para dentro da crista (peso g → 0), e o lábio
+       caído afunda abaixo da superfície enquanto some. */
+    const zMin = SHORE + (w.shoreW < 5 ? 1 : 6);
+    const zW = smooth(zMin, zMin + 5, w.zc);
     for (let c = 0; c < LIP_COLS; c++) {
       const x = LIP_X0 + c * LIP_DX;
       const a = brokenAge(w, x);
       const base = c * LIP_RING;
-      const hl = hollowAt(w, x);
-      const active = hl > 0.05 && a > -0.3 && a < land + 0.8 && w.zc > SHORE + (w.shoreW < 5 ? 1 : 6) && Math.abs(x) < 158;
+      const hl = hollowAt(w, x), hc = Math.min(hl, 1);
       const H = waveAt(x, w.zc, _lw).h;
-      if (!active || H < 0.9) {
-        for (let r = 0; r < LIP_RING; r++) { const j = (base + r) * 3; pos[j] = x; pos[j + 1] = H - 0.4; pos[j + 2] = w.zc; al[base + r] = 0; fo[base + r] = 0; }
+      const sw = smooth(0.05, 0.4, hl) * smooth(0.9, 1.6, H) * zW * (1 - smooth(148, 158, Math.abs(x)));
+      const grow = smooth(-0.9, 0.1, a);                      // crista se inclinando antes de quebrar
+      const g8 = sw * grow;
+      if (sw < 0.001 || a < -0.9 || a > land + 0.5 + 0.05 * H) {
+        // fora da quebra: o lábio inteiro vira um ponto escondido na crista (o mesmo limite de g8 → 0)
+        for (let r = 0; r < LIP_RING; r++) { const j = (base + r) * 3; pos[j] = x; pos[j + 1] = H - 0.05; pos[j + 2] = w.zc; al[base + r] = 0; fo[base + r] = 0; }
         continue;
       }
       any = true;
       const p = clamp(a / land, 0, 1);                       // quanto o lábio já caiu
-      const col = smooth(land, land + 0.75, a);               // desabando em espuma
-      const L = H * 1.35 * (0.75 + 0.25 * hl);                // tubo ≈ 1,3× mais largo que alto (laje: mais)
-      const s1 = 0.3 + 0.7 * p;
-      const u0 = -0.7, y0 = H - 0.12;
-      const u1 = L * 0.55 * s1, y1 = H * (1 + 0.1 * s1);
-      const u2 = L * 1.05 * s1, y2 = H * (1 - 0.5 * p);
-      const u3 = L * (0.3 + 0.65 * p);
-      const yLand = waveAt(x, w.zc - u3, _lw).h + 0.05;
-      const y3 = lerp(H * 0.92, yLand, p * p);                // queda livre: parábola
+      const colEnd = land + 0.45 + 0.05 * H;
+      const col = smooth(land * 0.95, colEnd, a);             // desabando em espuma (onda grande demora mais)
+      const L = H * 1.3 * (0.75 + 0.25 * hl);                 // tubo ≈ 1,3× mais largo que alto (laje: mais)
+      /* O lábio é o topo da própria onda, não uma casca por cima dela ("balde"): a superfície de DENTRO nasce
+         na face (a ~metade da altura, ainda dentro da água, e sai dela onde a face fica côncava) e a de FORA
+         nasce nas costas da onda, passando por cima da crista. A crista da malha de água fica escondida dentro
+         do lábio, então face → parede do tubo → lábio é uma superfície só. */
+      let uF = 2.5;                                           // ponto da face com ~50% da altura
+      // interpolado entre as amostras para variar contínuo (em degraus de 0,2 m ele pulava)
+      for (let q = 0.2, hPrev = H; q < 3; q += 0.2) { const hq = waveAt(x, w.zc - q, _lw).h; if (hq < H * 0.5) { uF = q - 0.2 + 0.2 * clamp((hPrev - H * 0.5) / Math.max(hPrev - hq, 1e-4), 0, 1); break; } hPrev = hq; }
+      const u3 = L * (0.22 + 0.73 * p);                       // ponta: velocidade horizontal constante
+      const yLand = waveAt(x, w.zc - u3 * g8, _lw).h + 0.05;
+      const y3 = lerp(H * 0.9, yLand, p * p);                 // ponta: queda livre (parábola)
+      // costas (fora) e parede do tubo (dentro), com a mesma ponta
+      const o0u = -2.0, o0y = H - 0.15, o1u = L * 0.4 * (0.4 + 0.6 * p), o1y = H * (1.03 + 0.05 * p), o2u = L * (0.3 + 0.8 * p), o2y = H * (1 - 0.4 * p);
+      const i0u = uF, i0y = H * 0.45, i1u = uF * 0.6 + L * 0.06 * p, i1y = H * (0.93 + 0.08 * p), i2u = L * (0.2 + 0.62 * p), i2y = H * (0.84 - 0.45 * p);
+      const tipT = 0.03 + 0.04 * H * (1 - p * 0.5);         // espessura da ponta
+      const roll = col * L * 0.25;                            // a espuma rola para a frente ao desabar
+      const alpha = (1 - smooth(0.45, 0.95, col)) * Math.min(1, g8 * 2.5);
       for (let k = 0; k <= LIP_K; k++) {
         const t = k / LIP_K;
-        let u = bez(u0, u1, u2, u3, t), y = bez(y0, y1, y2, y3, t);
-        const zw = w.zc - u, wh = waveAt(x, zw, _lw).h;
-        y = lerp(y, wh + 0.25, col);
-        _cu[k] = u; _cy[k] = Math.max(y, wh - 0.05);
-      }
-      const alpha = (1 - smooth(0.55, 1, col)) * smooth(-0.3, 0.05, a);
-      for (let k = 0; k <= LIP_K; k++) {
-        const s = k / LIP_K;
-        const kp = Math.max(0, k - 1), kn = Math.min(LIP_K, k + 1);
-        let tu = _cu[kn] - _cu[kp], ty = _cy[kn] - _cy[kp]; const tl = Math.hypot(tu, ty) || 1; tu /= tl; ty /= tl;
-        const nu = -ty, ny = tu;                               // normal para fora (costas do lábio)
-        const th = (H * (0.17 * (1 - s) + 0.03) + 0.04) * (1 - 0.6 * col) * 0.5 * (0.7 + 0.3 * hl);
         const jo = (base + k) * 3, ji = (base + LIP_RING - 1 - k) * 3;
-        pos[jo] = x; pos[jo + 1] = _cy[k] + ny * th; pos[jo + 2] = w.zc - (_cu[k] + nu * th);
-        pos[ji] = x; pos[ji + 1] = _cy[k] - ny * th; pos[ji + 2] = w.zc - (_cu[k] - nu * th);
-        const f = smooth(0.6, 1.0, s) * (0.5 + 0.5 * p) + col * 0.95 + 0.06;
+        for (let side = 0; side < 2; side++) {
+          let u, y;
+          if (side === 0) { u = bez(o0u, o1u, o2u, u3, t); y = bez(o0y, o1y, o2y, y3 + tipT, t); }
+          else { u = bez(i0u, i1u, i2u, u3, t); y = bez(i0y, i1y, i2y, y3 - tipT, t); }
+          u = u * g8 + roll * t; y = H + (y - H) * g8;
+          const wh = waveAt(x, w.zc - u, _lw).h;
+          // fora: começa embaixo das costas (escondida) e sai logo acima delas, cobrindo a crista
+          if (side === 0) { const e = smooth(0.05, 0.25, t); y = Math.max(y, wh + (0.04 * e - 0.12 * (1 - e)) * (1 - col)); }
+          y = lerp(y, wh - 0.45, col * col);                 // afunda na água branca em vez de boiar como placa
+          const j = side === 0 ? jo : ji;
+          pos[j] = x; pos[j + 1] = y; pos[j + 2] = w.zc - u;
+        }
+        const f = smooth(0.8, 1.0, t) * (0.25 + 0.55 * p) + col * 0.95;   // espuma só na ponta e no colapso
         al[base + k] = al[base + LIP_RING - 1 - k] = alpha;
         fo[base + k] = fo[base + LIP_RING - 1 - k] = f;
       }
@@ -1043,8 +1153,8 @@ function makeBoard() {
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, 0.16), M(0x23394a)); fin.position.set(0, -0.09, -0.85); g.add(fin);
   return g;
 }
-function makeChar() {
-  const skin = M(0xc28456, { flatShading: false, roughness: 0.7 }), shorts = M(0xff6f4f, { flatShading: false }), shorts2 = M(0xffd166, { flatShading: false }), hair = M(0x2a1b12, { flatShading: false });
+function makeChar(shortsCol = 0xff6f4f, shorts2Col = 0xffd166) {
+  const skin = M(0xc28456, { flatShading: false, roughness: 0.7 }), shorts = M(shortsCol, { flatShading: false }), shorts2 = M(shorts2Col, { flatShading: false }), hair = M(0x2a1b12, { flatShading: false });
   const root = new THREE.Group();
   const J = {};
   const hips = new THREE.Group(); hips.position.y = 0.95; root.add(hips); J.hips = hips;
@@ -1091,6 +1201,176 @@ function boardToSand(x, z, yaw) { scene.add(board); board.position.set(x, terrai
 boardToSand(BOARD_HOME.x, BOARD_HOME.z, 0.6);
 const marker = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.45, 4), new THREE.MeshBasicMaterial({ color: 0xffd166 }));
 marker.rotation.x = Math.PI; scene.add(marker);
+
+/* ---------- Vaca: mini ragdoll levado pela água ----------
+   15 partículas nas juntas (integração de Verlet, 120 passos/s) ligadas por bastões rígidos: cada junta é uma
+   bola-e-soquete (como um BallSocketConstraint), gira livre, com limites simples no cotovelo, joelho e pescoço.
+   A água age em cada partícula: empuxo (o peito boia mais por causa do ar no pulmão, os pés afundam), arrasto
+   contra a velocidade da água, a espuma empurrando para a praia, a superfície subindo e levando junto, e o
+   redemoinho da água branca girando o corpo ("máquina de lavar"). A prancha boia presa no pé pela cordinha. */
+const RD_N = ['pel', 'che', 'hea', 'shL', 'shR', 'elL', 'elR', 'haL', 'haR', 'hpL', 'hpR', 'knL', 'knR', 'ftL', 'ftR'];
+const RI = {}; RD_N.forEach((n, i) => { RI[n] = i; });
+const RD_REST = { pel: [0, 0.95, 0], che: [0, 1.5, 0], hea: [0, 1.74, 0], shL: [0.235, 1.5, 0], shR: [-0.235, 1.5, 0], elL: [0.235, 1.2, 0], elR: [-0.235, 1.2, 0],
+  haL: [0.235, 0.9, 0], haR: [-0.235, 0.9, 0], hpL: [0.095, 0.92, 0], hpR: [-0.095, 0.92, 0], knL: [0.095, 0.48, 0], knR: [-0.095, 0.48, 0], ftL: [0.095, 0.03, 0], ftR: [-0.095, 0.03, 0] };
+const rdDist = (a, b) => Math.hypot(RD_REST[a][0] - RD_REST[b][0], RD_REST[a][1] - RD_REST[b][1], RD_REST[a][2] - RD_REST[b][2]);
+const RD_LINKS = [['pel', 'che'], ['che', 'hea'], ['che', 'shL'], ['che', 'shR'], ['shL', 'shR'], ['pel', 'hpL'], ['pel', 'hpR'], ['hpL', 'hpR'],
+  ['pel', 'shL'], ['pel', 'shR'], ['che', 'hpL'], ['che', 'hpR'], ['shL', 'hpR'], ['shR', 'hpL'],
+  ['shL', 'elL'], ['elL', 'haL'], ['shR', 'elR'], ['elR', 'haR'], ['hpL', 'knL'], ['knL', 'ftL'], ['hpR', 'knR'], ['knR', 'ftR']].map(([a, b]) => [RI[a], RI[b], rdDist(a, b)]);
+// limites das juntas: distância mínima (cotovelo e joelho não dobram por completo, pescoço não quebra)
+const RD_MIN = [['shL', 'haL', 0.32], ['shR', 'haR', 0.32], ['hpL', 'ftL', 0.5], ['hpR', 'ftR', 0.5], ['pel', 'hea', 0.66], ['shL', 'hea', 0.24], ['shR', 'hea', 0.24],
+  ['haL', 'hpL', 0.12], ['haR', 'hpR', 0.12], ['ftL', 'ftR', 0.12], ['knL', 'knR', 0.12]].map(([a, b, d]) => [RI[a], RI[b], d]);
+const RD_BUOY = [1.12, 1.5, 1.25, 1.15, 1.15, 1.0, 1.0, 0.95, 0.95, 1.08, 1.08, 0.98, 0.98, 0.9, 0.9];
+const RD_H = 1 / 120;
+const RD = { on: false, t: 0, acc: 0, p: [], o: [], wh: new Float32Array(15), wf: new Float32Array(15), wv: new Float32Array(15), hp: new Float32Array(15),
+  b: new V3(), bo: new V3(), byaw: 0, spin: new V3(), swim: 0, cm: new V3() };
+for (let i = 0; i < 15; i++) { RD.p.push(new V3()); RD.o.push(new V3()); }
+const _ra = new V3(), _rb = new V3(), _rc = new V3(), _rd = new V3(), _re = new V3(), _rm = new THREE.Matrix4();
+const _rq1 = new THREE.Quaternion(), _rq2 = new THREE.Quaternion(), _rq3 = new THREE.Quaternion(), _rq4 = new THREE.Quaternion();
+const V_DOWN = new V3(0, -1, 0), V_UP = new V3(0, 1, 0);
+const JL = () => [J.hips, J.spine, J.head, J.shL, J.elL, J.shR, J.elR, J.hipL, J.knL, J.hipR, J.knR];
+// orientação com eixo Y = yAx e X = xAx (ortogonalizado)
+function basisQ(xAx, yAx, out) {
+  _rb.copy(yAx).normalize(); _ra.copy(xAx).addScaledVector(_rb, -xAx.dot(_rb));
+  if (_ra.lengthSq() < 1e-8) _ra.set(1, 0, 0); _ra.normalize();
+  _rc.crossVectors(_ra, _rb); _rm.makeBasis(_ra, _rb, _rc); return out.setFromRotationMatrix(_rm);
+}
+// aponta o osso (direção de repouso rest, no espaço do pai) para from→to; devolve a rotação do osso no mundo
+function aimBone(bone, parentQ, from, to, rest, outWorld) {
+  _rd.subVectors(to, from); if (_rd.lengthSq() < 1e-8) _rd.copy(rest);
+  _rd.applyQuaternion(_rq4.copy(parentQ).invert()).normalize();
+  bone.quaternion.setFromUnitVectors(rest, _rd);
+  return outWorld.copy(parentQ).multiply(bone.quaternion);
+}
+function rdStart(vx, vy, vz, opt = {}) {
+  (hero.parent || scene).updateMatrixWorld(true);
+  const P = RD.p, O = RD.o, wp = (o, x, y, z) => o.localToWorld(new V3(x, y, z));
+  P[RI.pel].copy(J.hips.getWorldPosition(new V3()));
+  P[RI.che].copy(wp(J.spine, 0, 0.45, 0)); P[RI.hea].copy(wp(J.head, 0, 0.17, 0));
+  P[RI.shL].copy(J.shL.getWorldPosition(new V3())); P[RI.shR].copy(J.shR.getWorldPosition(new V3()));
+  P[RI.elL].copy(J.elL.getWorldPosition(new V3())); P[RI.elR].copy(J.elR.getWorldPosition(new V3()));
+  P[RI.haL].copy(wp(J.elL, 0, -0.3, 0)); P[RI.haR].copy(wp(J.elR, 0, -0.3, 0));
+  P[RI.hpL].copy(J.hipL.getWorldPosition(new V3())); P[RI.hpR].copy(J.hipR.getWorldPosition(new V3()));
+  P[RI.knL].copy(J.knL.getWorldPosition(new V3())); P[RI.knR].copy(J.knR.getWorldPosition(new V3()));
+  P[RI.ftL].copy(wp(J.knL, 0, -0.45, 0)); P[RI.ftR].copy(wp(J.knR, 0, -0.45, 0));
+  // tombo inicial: rola por cima da cabeça para a frente (o lábio joga você em direção à praia)
+  const tv = opt.throwV || new V3(0, 0, 0), w0 = opt.spin || new V3(-3 - Math.random() * 3, rs(2), rs(2));
+  const pel = P[RI.pel];
+  for (let i = 0; i < 15; i++) {
+    _ra.subVectors(P[i], pel); _rb.crossVectors(w0, _ra);
+    O[i].set(P[i].x - (vx + tv.x + _rb.x) * RD_H, P[i].y - (vy + tv.y + _rb.y) * RD_H, P[i].z - (vz + tv.z + _rb.z) * RD_H);
+    const wo = waveAt(P[i].x, P[i].z, _lw); RD.hp[i] = wo.h; RD.wh[i] = wo.h; RD.wf[i] = wo.foam; RD.wv[i] = 0;
+  }
+  rig.updateMatrixWorld(true);
+  RD.b.copy(rig.getWorldPosition(new V3())); RD.bo.set(RD.b.x - vx * RD_H * 0.8, RD.b.y - 2 * RD_H, RD.b.z - vz * RD_H * 0.8);
+  RD.byaw = S.heading; RD.spin.set(-3.5 - Math.random() * 2.5, rs(1.2), rs(1.2));
+  RD.t = 0; RD.acc = 0; RD.swim = 0; RD.on = true;
+  scene.add(hero);
+  rdPose();
+}
+function rdStep(h) {
+  const P = RD.p, O = RD.o, cm = RD.cm.set(0, 0, 0);
+  const release = 1 + 0.3 * smooth(1.2, 2.6, RD.t);         // passado o caldo, o corpo relaxa e boia
+  for (let i = 0; i < 15; i++) cm.add(P[i]); cm.multiplyScalar(1 / 15);
+  for (let i = 0; i < 15; i++) {
+    const p = P[i], o = O[i];
+    const vx = (p.x - o.x) / h, vy = (p.y - o.y) / h, vz = (p.z - o.z) / h;
+    const wh = RD.wh[i], fo = clamp(RD.wf[i], 0, 1.4);
+    const sub = clamp((wh - p.y + 0.1) / 0.3, 0, 1);       // 0 = no ar, 1 = submerso
+    let ax = 0, ay = -9.8, az = 0;
+    ay += 9.8 * RD_BUOY[i] * sub * (release + RD.swim);     // empuxo (+ nadando para cima)
+    const kd = 0.12 + 3.2 * sub * (1 + 0.6 * fo);            // arrasto da água
+    ax += -vx * kd; ay += (RD.wv[i] - vy) * kd * 0.5; az += (-C * 0.4 * fo - vz) * kd;   // a espuma empurra para a praia (bem mais devagar que a onda, que passa por cima)
+    if (sub > 0 && fo > 0.2) {                               // redemoinho da água branca
+      _ra.subVectors(p, cm); _rb.crossVectors(RD.spin, _ra); const k = fo * sub * 3.5;
+      ax += _rb.x * k; ay += _rb.y * k; az += _rb.z * k;
+    }
+    const nx = p.x + (p.x - o.x) * 0.998 + ax * h * h, ny = p.y + (p.y - o.y) * 0.998 + ay * h * h, nz = p.z + (p.z - o.z) * 0.998 + az * h * h;
+    o.copy(p); p.set(nx, ny, nz);
+    const ter = terrainH(p.x, p.z) + 0.06;
+    if (p.y < ter) { p.y = ter; o.x += (p.x - o.x) * 0.35; o.z += (p.z - o.z) * 0.35; }   // atrito na areia
+  }
+  for (let it = 0; it < 8; it++) {
+    for (const [a, b, L] of RD_LINKS) {
+      const pa = P[a], pb = P[b]; _ra.subVectors(pb, pa); const d = _ra.length() || 1e-6; const k = (d - L) / d * 0.5;
+      pa.addScaledVector(_ra, k); pb.addScaledVector(_ra, -k);
+    }
+    for (const [a, b, L] of RD_MIN) {
+      const pa = P[a], pb = P[b]; _ra.subVectors(pb, pa); const d = _ra.length() || 1e-6; if (d >= L) continue; const k = (d - L) / d * 0.5;
+      pa.addScaledVector(_ra, k); pb.addScaledVector(_ra, -k);
+    }
+  }
+  // prancha: boia na superfície, a espuma empurra e a cordinha (2,6 m) segura no pé direito
+  const b = RD.b, bo = RD.bo, bw = waveAt(b.x, b.z, _lw), bfo = clamp(bw.foam, 0, 1.4);
+  const bvx = (b.x - bo.x) / h, bvy = (b.y - bo.y) / h, bvz = (b.z - bo.z) / h;
+  const bsub = clamp((bw.h + 0.03 - b.y) / 0.12, 0, 1);
+  const bkd = 0.2 + 3 * bsub;
+  const bay = -9.8 + 9.8 * 3 * bsub + (0 - bvy) * bkd, bax = -bvx * bkd, baz = (-C * 0.55 * bfo - bvz) * bkd;
+  bo.copy(b); b.set(b.x + bvx * h + bax * h * h, b.y + bvy * h + bay * h * h, b.z + bvz * h + baz * h * h);
+  const bt = terrainH(b.x, b.z) + 0.05; if (b.y < bt) b.y = bt;
+  const ft = P[RI.ftR]; _ra.subVectors(b, ft); const ld = _ra.length();
+  if (ld > 2.6) { const k = (ld - 2.6) / ld; b.addScaledVector(_ra, -k * 0.85); ft.addScaledVector(_ra, k * 0.15); }
+}
+function rdUpdate(dt) {
+  RD.t += dt;
+  for (let i = 0; i < 15; i++) {
+    const p = RD.p[i], wo = waveAt(p.x, p.z, _lw);
+    RD.wv[i] = clamp((wo.h - RD.hp[i]) / Math.max(dt, 1e-3), -8, 8); RD.hp[i] = wo.h; RD.wh[i] = wo.h; RD.wf[i] = wo.foam;
+  }
+  // o redemoinho perde força fora da espuma
+  if (RD.wf[1] < 0.3) RD.spin.multiplyScalar(Math.exp(-1.5 * dt));
+  RD.acc = Math.min(RD.acc + dt, 0.1);
+  while (RD.acc >= RD_H) { rdStep(RD_H); RD.acc -= RD_H; }
+  rdPose();
+  // prancha
+  const bvx = (RD.b.x - RD.bo.x) / RD_H, bvz = (RD.b.z - RD.bo.z) / RD_H, bsp = Math.hypot(bvx, bvz);
+  if (bsp > 0.6) RD.byaw += angDiff(Math.atan2(bvx, bvz), RD.byaw) * (1 - Math.exp(-1.2 * dt));
+  rig.position.copy(RD.b);
+  orientRig(RD.b.x, RD.b.z, RD.byaw, 0, 1 - Math.exp(-6 * dt));
+}
+// passa as partículas para os ossos do boneco
+function rdPose() {
+  const P = RD.p, hipsQ = _rq1, spQ = _rq2, tmpW = _rq3;
+  basisQ(_re.subVectors(P[RI.hpL], P[RI.hpR]), _rd.subVectors(P[RI.che], P[RI.pel]), hipsQ);
+  hero.quaternion.copy(hipsQ);
+  hero.position.copy(P[RI.pel]).sub(_re.set(0, 0.95, 0).applyQuaternion(hipsQ));
+  J.hips.position.set(0, 0.95, 0); J.hips.rotation.set(0, 0, 0);
+  basisQ(_re.subVectors(P[RI.shL], P[RI.shR]), _rd.subVectors(P[RI.che], P[RI.pel]), spQ);
+  J.spine.quaternion.copy(hipsQ).invert().multiply(spQ);
+  aimBone(J.head, spQ, P[RI.che], P[RI.hea], V_UP, tmpW);
+  const q = new THREE.Quaternion();
+  aimBone(J.shL, spQ, P[RI.shL], P[RI.elL], V_DOWN, q); aimBone(J.elL, q, P[RI.elL], P[RI.haL], V_DOWN, tmpW);
+  aimBone(J.shR, spQ, P[RI.shR], P[RI.elR], V_DOWN, q); aimBone(J.elR, q, P[RI.elR], P[RI.haR], V_DOWN, tmpW);
+  aimBone(J.hipL, hipsQ, P[RI.hpL], P[RI.knL], V_DOWN, q); aimBone(J.knL, q, P[RI.knL], P[RI.ftL], V_DOWN, tmpW);
+  aimBone(J.hipR, hipsQ, P[RI.hpR], P[RI.knR], V_DOWN, q); aimBone(J.knR, q, P[RI.knR], P[RI.ftR], V_DOWN, tmpW);
+}
+// fim da vaca: sobe na prancha (ou fica de pé no raso) e o corpo passa suave do ragdoll para a pose normal
+function rdEnd() {
+  RD.on = false;
+  hero.updateMatrixWorld(true);
+  const wpos = hero.getWorldPosition(new V3()), wq = hero.getWorldQuaternion(new THREE.Quaternion());
+  const jq = JL().map(j => j.quaternion.clone());
+  S.pos.set(RD.b.x, 0, RD.b.z); S.heading = RD.byaw;
+  S.speed = 0; S.wx = S.wz = 0; S.vx = S.vz = 0;
+  const depth = waterH(S.pos.x, S.pos.z) - terrainH(S.pos.x, S.pos.z);
+  if (depth < 0.6) { S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); }
+  else enterPaddle(false);
+  const par = hero.parent; par.updateMatrixWorld(true);
+  const sp = par.worldToLocal(wpos.clone()), sq = par.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(wq);
+  S.rec = { t: 0.55, dur: 0.55, sp, sq, tp: hero.position.clone(), tq: hero.quaternion.clone(), jq, mode: S.mode };
+}
+function recoverBlend(dt) {
+  const r = S.rec; if (!r) return;
+  r.t -= dt;
+  const fixed = r.mode === 'paddle';
+  if (r.t <= 0 || r.mode !== S.mode) {
+    if (fixed && r.mode === S.mode) { hero.position.copy(r.tp); hero.quaternion.copy(r.tq); }
+    S.rec = null; return;
+  }
+  const k = smooth(0, 1, r.t / r.dur);                    // 1 = ragdoll, 0 = pose normal
+  if (fixed) { hero.position.copy(r.tp); hero.quaternion.copy(r.tq); }
+  hero.position.lerp(r.sp, k); hero.quaternion.slerp(r.sq, k);
+  JL().forEach((j, i) => j.quaternion.slerp(r.jq[i], k));
+}
 
 /* Spray, névoa e espuma: partículas com tipo (0 gota, 1 névoa, 2 espuma boiando) */
 const SPN = 16000;
@@ -1153,15 +1433,14 @@ function emitFoam(x, z, vx, vz, n = 1, spread = 1, life = 0) {
 const swHalf = [false, false, false];
 function swashFx(dt) {
   for (let i = 0; i < 3; i++) {
-    const w = W[i];
+    const w = SW[i];
     for (let t = 0; t < 10; t++) {
       const x = -150 + Math.random() * 300;
       const zf = swashFront(w, x, _sw); if (zf > 500 || Math.abs(x) > 150) continue;
       if (_sw.up && Math.random() < dt * 20) emitFoam(x, zf + 0.3, 0, -_sw.u * 0.9, 1, 0.5);
     }
     const Tsw = 2 * Math.sqrt(2 * GB * w.Rh) / GB, half = w.tau > Tsw * 0.5 && w.tau < Tsw * 0.5 + 0.5;
-    if (half && !swHalf[i]) for (let x = -150; x < 150; x += 1.2) { const zf = swashFront(w, x, _sw); if (zf < 500) emitFoam(x, zf + 0.15, 0, 0, 1, 0.4, 7 + Math.random() * 5); }
-    swHalf[i] = half;
+    if (half && swHalf[i] !== w.n) { swHalf[i] = w.n; for (let x = -150; x < 150; x += 1.2) { const zf = swashFront(w, x, _sw); if (zf < 500) emitFoam(x, zf + 0.15, 0, 0, 1, 0.4, 7 + Math.random() * 5); } }
   }
 }
 function updateSpray(dt) {
@@ -1264,6 +1543,8 @@ function pop(text, sub = '', bad = false) {
   if (sub) { const s = document.createElement('small'); s.textContent = sub; d.appendChild(s); }
   hud.pops.appendChild(d); setTimeout(() => d.remove(), 1800);
   while (hud.pops.children.length > 3) hud.pops.firstChild.remove();
+  // os outros jogadores veem as suas manobras e vacas no canto da tela
+  if (/Vaca|Tub|Aéreo|Melhor|Floater|Batida|Cutback|Rasgada|Furou|Drop/.test(text) && typeof netEvent === 'function') netEvent(text, sub, bad);
 }
 const fmt = n => Math.round(n).toLocaleString('pt-BR');
 
@@ -1356,7 +1637,7 @@ function startRide() {
       const straight = Math.abs(Math.sin(S.heading) * dhx + Math.cos(S.heading) * dhz);
       if (straight > 0.92 && S.speed < 3.4) {
         S.ride = { pts: 0, time: 0, tricks: 0, top: 0, moves: {} };
-        rig.add(hero); wipeout('o bico enterrou no drop'); return;
+        rig.add(hero); wipeout('o bico enterrou no drop', 'nose'); return;
       }
       late = true;
     }
@@ -1383,11 +1664,18 @@ function endRide(reason) {
   else if (reason !== 'wipe') pop('+' + fmt(pts), reason === 'shore' ? 'até a beira' : reason === 'kick' ? 'saiu da onda' : 'a onda passou');
   S.ride = null;
 }
-function wipeout(msg) {
+// kind: 'lip' (o lábio caiu em cima), 'close' (tubo/onda fechou), 'foam' (espuma), 'rail' (rabeta), 'nose' (bico enterrou), 'air'
+function wipeout(msg, kind = 'lip') {
   endRide('wipe');
-  S.mode = 'wipe'; S.wipeT = 2.3;
-  scene.add(hero); hero.position.copy(rig.position); hero.position.y += 0.4;
-  hero.userData.spin = new V3((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 9);
+  const fromAir = S.mode === 'air';
+  const vx = S.vx || 0, vz = S.vz || 0, vy = fromAir ? S.vy : 0;
+  S.mode = 'wipe'; S.duck = null; S.rec = null;
+  let throwV, spin;
+  if (kind === 'lip' || kind === 'close') { throwV = new V3(rs(0.8), -2.5, -4.5); spin = new V3(-5 - Math.random() * 3, rs(2), rs(2)); }   // por cima da cabeça, para a praia
+  else if (kind === 'nose') { throwV = new V3(0, 1.2, Math.sign(vz || 1) * 1.5); spin = new V3(Math.sign(vz || 1) * 6, 0, rs(1)); }   // catapultado pelo bico
+  else if (kind === 'rail') { throwV = new V3(Math.sign(vx || 1) * 1.5, 0.8, 0); spin = new V3(rs(1), rs(2), -Math.sign(vx || 1) * 5); }  // cai de lado
+  else { throwV = new V3(0, 0.3, -1); spin = new V3(-3 - Math.random() * 2, rs(2), rs(2)); }
+  rdStart(vx, vy, vz, { throwV, spin });
   pop('Vaca!', msg, true);
   splashSound(1);
   dropsT = 1.6; shakeT = 1.0;
@@ -1407,6 +1695,7 @@ function enterWalk() {
 }
 function respawn() {
   if (S.ride) endRide('wipe');
+  RD.on = false; S.rec = null; S.duck = null;
   S.pos.set(0, 0, -22); S.facing = 0; S.hasBoard = false; S.y = terrainH(0, -22); camYaw = 0;
   enterWalk(); boardToSand(BOARD_HOME.x, BOARD_HOME.z, 0.6);
 }
@@ -1417,20 +1706,21 @@ const cur = Object.assign({}, POSE);
 function legLen(hx, kn, hz) { return (0.44 * Math.cos(hx) + 0.47 * Math.cos(hx + kn)) * Math.cos(hz) + 0.04; }
 function applyPose(tgt, k) {
   for (const key in tgt) cur[key] = lerp(cur[key], tgt[key], k);
-  J.hips.position.y = cur.hipsY;
+  // define a rotação inteira de cada junta (o ragdoll deixa giros em y/z que não podem sobrar)
+  J.hips.position.set(0, cur.hipsY, 0); J.hips.rotation.set(0, 0, 0);
   J.spine.rotation.set(cur.spX, cur.spY, cur.spZ);
   J.head.rotation.set(cur.hdX, cur.hdY, 0);
-  J.shL.rotation.set(cur.shLx, 0, cur.shLz); J.elL.rotation.x = cur.elL;
-  J.shR.rotation.set(cur.shRx, 0, cur.shRz); J.elR.rotation.x = cur.elR;
-  J.hipL.rotation.set(cur.hpLx, 0, cur.hpLz); J.knL.rotation.x = cur.knL;
-  J.hipR.rotation.set(cur.hpRx, 0, cur.hpRz); J.knR.rotation.x = cur.knR;
+  J.shL.rotation.set(cur.shLx, 0, cur.shLz); J.elL.rotation.set(cur.elL, 0, 0);
+  J.shR.rotation.set(cur.shRx, 0, cur.shRz); J.elR.rotation.set(cur.elR, 0, 0);
+  J.hipL.rotation.set(cur.hpLx, 0, cur.hpLz); J.knL.rotation.set(cur.knL, 0, 0);
+  J.hipR.rotation.set(cur.hpRx, 0, cur.hpRz); J.knR.rotation.set(cur.knR, 0, 0);
 }
 function standHips(t) { t.hipsY = Math.max(legLen(t.hpLx, t.knL, t.hpLz), legLen(t.hpRx, t.knR, t.hpRz)) + 0.03; }
 
 /* ---------- Loop ---------- */
 const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion();
 const vUp = new V3(), vF = new V3(), vR = new V3();
-function orientRig(x, z, yaw, bank, k, levelBlend = 0) {
+function orientRig(x, z, yaw, bank, k, levelBlend = 0, pitch = 0) {
   const g = grad(x, z);
   vUp.set(-g.gx, 1, -g.gz).normalize();
   if (levelBlend) vUp.lerp(new V3(0, 1, 0), levelBlend).normalize();
@@ -1439,6 +1729,7 @@ function orientRig(x, z, yaw, bank, k, levelBlend = 0) {
   tmpM.makeBasis(vR, vUp, vF); tmpQ.setFromRotationMatrix(tmpM);
   const bq = new THREE.Quaternion().setFromAxisAngle(new V3(0, 0, 1), bank);
   tmpQ.multiply(bq);
+  if (pitch) tmpQ.multiply(new THREE.Quaternion().setFromAxisAngle(new V3(1, 0, 0), pitch));   // + = bico para baixo
   rig.quaternion.slerp(tmpQ, k);
   return g;
 }
@@ -1446,8 +1737,14 @@ function orientRig(x, z, yaw, bank, k, levelBlend = 0) {
 let started = false;
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min((now - last) / 1000, 0.05); last = now; clock += dt;
-  if (!window.__mareFreeze) T += dt; updateWaves(); updateLevel(dt); updateWet(dt); swashFx(dt);
+  const dt = Math.min((now - last) / 1000, 0.05); last = now;
+  runFrame(dt);
+  requestAnimationFrame(frame);
+}
+function runFrame(dt) {
+  if (!(dt > 1e-4)) dt = 1e-4;   // dois quadros com o mesmo horário davam dt = 0 e a curva dividia por zero (velocidade NaN)
+  clock += dt;
+  if (!window.__mareFreeze) T = seaTime(); updateWaves(); updateLevel(dt); updateWet(dt); swashFx(dt);
   waterU.uLevel.value = LEVEL;
   water.material.uniforms.uTime.value = T; farWater.material.uniforms.uTime.value = T;
   updateLips();
@@ -1462,10 +1759,10 @@ function frame(now) {
   }
   updateAudio(dt);
   updateMist(dt);
+  updateNet(dt);
   shakeT = Math.max(0, shakeT - dt * 1.4);
   if (window.__mareCam) { const c = window.__mareCam; camera.position.set(c.p[0], c.p[1], c.p[2]); camera.lookAt(c.t[0], c.t[1], c.t[2]); }
   renderFrame(dt);
-  requestAnimationFrame(frame);
 }
 
 function idleCam(dt) {
@@ -1555,18 +1852,35 @@ function step(dt) {
     camFollow(dt, focus, null, 7.5);
   }
   else if (S.mode === 'paddle') {
-    S.heading += -ax * 1.9 * dt;
-    if (ay > 0) S.speed += 3.2 * ay * dt; else if (ay < 0) S.speed += 2.5 * ay * dt;
-    S.speed -= S.speed * 0.75 * dt; S.speed = clamp(S.speed, -1, 5.4);
+    /* Duck dive (furar a onda): ESPAÇO remando para o fundo empurra o bico para baixo e a prancha mergulha
+       (mais fundo quanto mais rápido você remava). Segurando ESPAÇO você fica embaixo até ~1,8 s de fôlego;
+       soltando, sobe com o bico para cima. Embaixo d'água a turbulência da espuma e do lábio passa por cima:
+       o empurrão da onda cai 85% e o lábio não te derruba. */
+    S.duckCool = Math.max(0, (S.duckCool || 0) - dt);
+    const d = S.duck;
+    let dd = 0, prot = 0, pitch = 0;
+    if (d) {
+      d.t += dt;
+      if (!d.rel && d.t > 0.45 && (!keys.Space || d.t > d.max)) d.rel = d.t;      // soltou o espaço ou acabou o fôlego
+      const up = d.rel ? smooth(d.rel, d.rel + 0.45, d.t) : 0;
+      dd = d.D * smooth(0, 0.35, d.t) * (1 - up);
+      prot = smooth(0.25, 0.65, dd);
+      pitch = 0.65 * smooth(0, 0.12, d.t) * (1 - smooth(0.3, 0.55, d.t)) - 1.8 * up * (1 - up);
+    }
+    S.heading += -ax * 1.9 * dt * (d ? 0.35 : 1);
+    if (!d) { if (ay > 0) S.speed += 3.2 * ay * dt; else if (ay < 0) S.speed += 2.5 * ay * dt; }
+    S.speed -= S.speed * (d ? 0.3 : 0.75) * dt; S.speed = clamp(S.speed, -1, 5.4);
     const g = grad(S.pos.x, S.pos.z); const fo = waveAt(S.pos.x, S.pos.z).foam;
-    S.wx += -g.gx * 7 * dt; S.wz += -g.gz * 7 * dt - fo * 6 * dt;
+    const shield = 1 - 0.85 * prot;
+    S.wx += -g.gx * 7 * dt * shield; S.wz += (-g.gz * 7 - fo * 8) * dt * shield;
     const dmp = Math.exp(-1.3 * dt); S.wx *= dmp; S.wz *= dmp;
+    if (d && prot > 0.5) d.absorbed = Math.max(d.absorbed, fo + Math.max(0, g.gz));    // o que passou por cima
     const fx = Math.sin(S.heading), fz = Math.cos(S.heading);
     S.vx = fx * S.speed + S.wx; S.vz = fz * S.speed + S.wz;
     S.pos.x = clamp(S.pos.x + S.vx * dt, -150, 150); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 235);
     const h = waterH(S.pos.x, S.pos.z); const depth = h - terrainH(S.pos.x, S.pos.z);
-    rig.position.set(S.pos.x, h + 0.04, S.pos.z);
-    orientRig(S.pos.x, S.pos.z, S.heading, Math.sin(clock * 1.7) * 0.04, 1 - Math.exp(-8 * dt));
+    rig.position.set(S.pos.x, h + 0.04 - dd, S.pos.z);
+    orientRig(S.pos.x, S.pos.z, S.heading, Math.sin(clock * 1.7) * 0.04, 1 - Math.exp(-8 * dt), dd > 0.3 ? 0.6 : 0, pitch);
     // pose remando
     S.phase += dt * (ay > 0 ? 5.5 : 1.2);
     const pa = ay > 0 ? 1 : 0.25;
@@ -1574,13 +1888,48 @@ function step(dt) {
     tgt.shLx = S.phase % TAU * pa + (1 - pa) * -0.5; tgt.shRx = (S.phase + Math.PI) % TAU * pa + (1 - pa) * -0.5;
     tgt.shLz = 0.15; tgt.shRz = -0.15; tgt.elL = -0.2; tgt.elR = -0.2;
     tgt.hpLx = 0.1 + Math.sin(clock * 3) * 0.08; tgt.hpRx = 0.1 - Math.sin(clock * 3) * 0.08; tgt.knL = 0.5; tgt.knR = 0.5;
-    poseK = 1;
-    if (ay > 0 && Math.random() < dt * 14) emit(rig.position.x + fx * 0.3, h + 0.1, rig.position.z + fz * 0.3, -fx, 1.4, -fz, 2, 0.5);
+    poseK = S.rec ? 1 - Math.exp(-10 * dt) : 1;
+    if (d) {   // braços esticados empurrando as bordas e um joelho na rabeta, como no duck dive de verdade
+      tgt.shLx = -1.25; tgt.shRx = -1.25; tgt.shLz = 0.35; tgt.shRz = -0.35; tgt.elL = -0.25; tgt.elR = -0.25; tgt.hdX = -0.2;
+      tgt.hpRx = -0.35; tgt.knR = 1.3; tgt.hpLx = 0.15; tgt.knL = 0.15;
+      poseK = 1 - Math.exp(-16 * dt);
+      if (dd > 0.2 && Math.random() < dt * 30) { emitFoam(S.pos.x + rs(0.6), S.pos.z + rs(0.6), 0, 0, 1, 0.5, 1.2); }
+      if (d.rel && d.t > d.rel + 0.5) {
+        S.duck = null; S.duckCool = 0.3;
+        if (d.absorbed > 0.6) { pop('Furou a onda!'); S.speed = Math.max(S.speed, 2.4); }
+        emit(S.pos.x + fx * 1.2, h + 0.1, S.pos.z + fz * 1.2, fx * 1.5, 2, fz * 1.5, 12, 0.8);
+      }
+    }
+    if (ay > 0 && !d && Math.random() < dt * 14) emit(rig.position.x + fx * 0.3, h + 0.1, rig.position.z + fz * 0.3, -fx, 1.4, -fz, 2, 0.5);
 
     const toShore = -(S.vz) > 2.0;
     const onFace = g.gz > 0.12;
-    const canCatch = onFace && toShore && Math.hypot(S.vx, S.vz) > 2.6;
-    if (canCatch) { setHint(g.gz > 0.75 ? 'Drop atrasado! <b>ESPAÇO</b> e vire de lado para não enterrar o bico' : '<b>ESPAÇO</b> ficar de pé!'); if (jump) { startRide(); } }
+    const canCatch = !d && onFace && toShore && Math.hypot(S.vx, S.vz) > 2.6;
+    S.canCatch = canCatch;
+    // lábio caindo em cima de quem está remando (no ponto de impacto): sem duck dive, é vaca
+    const tw0 = nearestWave(S.pos.x, S.pos.z);
+    let lipIncoming = false, foamEta = 99;
+    for (const w of W) {
+      const fr = w.zc - S.pos.z, aw = brokenAge(w, S.pos.x);
+      if (aw > w.land * 0.6 && fr > -2 && fr < 18) foamEta = Math.min(foamEta, Math.max(0, (fr - 4) / C));
+      if (hollowAt(w, S.pos.x) >= 0.5 && aw > -0.8 && aw < w.land && fr > 0 && fr < 12) lipIncoming = true;
+    }
+    if (tw0 && !canCatch && prot < 0.5) {
+      const aw = brokenAge(tw0, S.pos.x), hlw = hollowAt(tw0, S.pos.x), Hw = waveAt(S.pos.x, tw0.zc, _lw).h, fr = tw0.zc - S.pos.z;
+      const lf = 1.25 * Hw * (0.75 + 0.25 * Math.min(hlw, 1.5));
+      // quem está entre a crista e o ponto onde o lábio cai, na hora em que ele cai, é sugado e leva o caldo
+      if (hlw >= 0.5 && Hw > 1.8 && aw >= tw0.land * 0.85 && aw < tw0.land + 0.35 && fr > -0.5 && fr < lf + 1.0) {
+        wipeout('o lábio caiu na sua cabeça · aperte ESPAÇO para furar a onda', 'lip');
+      }
+    }
+    if (S.mode !== 'paddle') { /* tomou a vaca agora */ }
+    else if (d) (hud.wave.textContent = '', setHint(d.rel ? 'Subindo do outro lado…' : 'Furando a onda… segure <b>ESPAÇO</b> embaixo · fôlego ' + Math.max(0, d.max - d.t).toFixed(1).replace('.', ',') + ' s'));
+    else if (canCatch) { setHint(g.gz > 0.75 ? 'Drop atrasado! <b>ESPAÇO</b> e vire de lado para não enterrar o bico' : '<b>ESPAÇO</b> ficar de pé!'); if (jump) { startRide(); } }
+    else if (jump && S.duckCool <= 0 && depth > 1.0) {
+      S.duck = { t: 0, D: 0.8 + 0.5 * clamp(S.speed / 4, 0, 1), max: 1.8, rel: 0, absorbed: 0 };
+      emit(S.pos.x + fx, h + 0.1, S.pos.z + fz, 0, 2.2, 0, 14, 0.7); splashSound(0.35);
+    }
+    else if ((foamEta < 1.6 || lipIncoming) && depth > 1.0 && S.vz > -1) setHint((lipIncoming ? 'O lábio vai cair aí!' : 'Espuma chegando!') + ' <b>ESPAÇO</b> na hora certa para furar (duck dive)');
     else {
       let nextEta = 99, nw = null;
       for (const w of W) { if (w.zc > S.pos.z + 2 && brokenAge(w, S.pos.x) < 0) { const eta = (w.zc - S.pos.z) / C; if (eta < nextEta) { nextEta = eta; nw = w; } } }
@@ -1594,9 +1943,9 @@ function step(dt) {
       } else hud.wave.textContent = '';
     }
     if (canCatch) hud.wave.textContent = '';
-    if (depth < 0.5) { S.pos.y = 0; S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); hud.wave.textContent = ''; }
-    setMode('Remando', 'paddle');
-    focus.set(rig.position.x, rig.position.y + 0.9, rig.position.z);
+    if (S.mode === 'paddle' && depth < 0.5) { S.duck = null; S.pos.y = 0; S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); hud.wave.textContent = ''; }
+    if (S.mode === 'paddle') setMode(S.duck ? 'Duck dive' : 'Remando', 'paddle');
+    focus.set(rig.position.x, Math.max(rig.position.y, h - 0.15) + 0.9, rig.position.z);
     camFollow(dt, focus, S.heading, 7.5);
   }
   else if (S.mode === 'ride') {
@@ -1714,8 +2063,17 @@ function step(dt) {
       emit(S.pos.x, h, S.pos.z, 0, 4, 0, 30, 1.6); splashSound(0.3);
     }
     // tubo e fechadeira
-    const covered = hl >= 0.5 && Hc > 1.5 && a > ld * 0.25 && a < ld && front > -0.5 && front < Hc * 1.2;
-    const crashed = hl >= 0.5 && Hc > 1.2 && a >= ld && a < ld + 0.85 && front > -1.5 && front < Hc * 1.1 + 1;
+    /* Regras do tubo (antes: vaca no instante em que o lábio tocava a água na sua coluna, até atrás da crista).
+       Agora, como no mar: o lábio cai a ~1,25·H na frente da crista. Quem está debaixo desse ponto leva o lábio
+       na cabeça; quem está mais fundo, entre a parede e o lábio, continua no bolsão de ar até o tubo desabar
+       (colapso ≈ 0,35 s + 0,05 s por metro de onda depois do lábio tocar). Correndo mais que a abertura você sai. */
+    const landFront = 1.25 * Hc * (0.75 + 0.25 * Math.min(hl, 1.5));
+    const collapseT = ld + 0.35 + 0.05 * Hc;
+    const covered = hl >= 0.5 && Hc > 1.5 && a > ld * 0.25 && a < collapseT && front > 0.1 && front < landFront - 0.3;
+    const lipHit = hl >= 0.5 && Hc > 1.2 && a >= ld * 0.92 && a < ld + 0.3 && Math.abs(front - landFront) < 0.9;
+    const closedOut = hl >= 0.5 && Hc > 1.2 && a >= collapseT && a < collapseT + 0.6 && front > 0.1 && front < landFront + 0.6;
+    const crashed = lipHit || closedOut;
+    const inPocket = hl >= 0.5 && a < collapseT + 0.1;                     // espuma de crista/lábio, não água branca
     const closing = !covered && tw && tw.close > 0.5 && a > -1.2 && a < ld * 0.25 && front < Hc * 1.4;
     S.tubeCam = lerp(S.tubeCam || 0, covered ? 1 : 0, 1 - Math.exp(-3 * dt));
     if (covered) {
@@ -1728,11 +2086,11 @@ function step(dt) {
       S.tubeT = 0;
     }
     // fim da onda
-    if (crashed) { const inTube = S.tubeT > 0.3; S.tubeT = 0; wipeout(inTube ? 'o tubo fechou com você dentro' : 'o lábio caiu em cima'); }
+    if (crashed) { const inTube = S.tubeT > 0.3; S.tubeT = 0; wipeout(closedOut ? (inTube ? 'o tubo fechou com você dentro · acelere (W) para sair antes' : 'a onda fechou em cima') : 'o lábio caiu bem na sua cabeça', closedOut ? 'close' : 'lip'); }
     else if (act && !popping) { endRide('kick'); S.speed = Math.min(sp * 0.4, 4); S.wx = S.wz = 0; enterPaddle(false); }
     else if (depth < 0.55) { endRide('shore'); S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); }
-    else if (wfm > 0.85 && sp < 4.2 && !popping) wipeout('a espuma te engoliu');
-    else if (!popping && Math.abs(diff) > 1.35 && sp < 4.5 && Math.abs(ax) > 0.5) wipeout('a rabeta soltou na curva');
+    else if (wfm > 0.85 && sp < 4.2 && !popping && !covered && !inPocket) wipeout('a espuma te engoliu', 'foam');
+    else if (!popping && !covered && Math.abs(diff) > 1.45 && sp < 4.5 && Math.abs(ax) > 0.5) wipeout('a rabeta soltou na curva', 'rail');
     else if ((g.gz < -0.02 && sp < 4.5) || (h < 0.35 && sp < 2.5)) { S.lostT += dt; if (S.lostT > 0.7) { endRide('lost'); S.speed = sp * 0.5; S.wx = S.wz = 0; enterPaddle(false); } }
     else S.lostT = 0;
     if (S.mode === 'ride') {
@@ -1775,7 +2133,7 @@ function step(dt) {
         const bonus = 350 + deg * 2.5; S.ride.pts += bonus; S.ride.tricks++;
         pop(deg >= 180 ? 'Aéreo ' + deg + '°' : 'Aéreo', '+' + fmt(bonus));
         emit(S.pos.x, h, S.pos.z, 0, 3, 0, 40, 1.8); splashSound(0.6);
-      } else { S.heading += S.spin; wipeout('caiu de lado no aéreo'); }
+      } else { S.heading += S.spin; wipeout('caiu de lado no aéreo', 'air'); }
     }
     setHint('<b>A/D</b> girar no ar · aterrisse alinhado');
     setMode('No ar', 'ride');
@@ -1783,30 +2141,30 @@ function step(dt) {
     camFollow(dt, focus, Math.atan2(S.vx, S.vz), 9);
   }
   else if (S.mode === 'wipe') {
-    S.wipeT -= dt;
-    const h = waterH(S.pos.x, S.pos.z);
-    S.vx *= Math.exp(-2.5 * dt); S.vz *= Math.exp(-2.5 * dt);
-    S.vz += -waveAt(S.pos.x, S.pos.z).foam * 5 * dt;
-    S.pos.x = clamp(S.pos.x + S.vx * dt, -150, 150); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 235);
-    const sv = hero.userData.spin; sv.multiplyScalar(Math.exp(-1.2 * dt));
-    hero.rotation.x += sv.x * dt; hero.rotation.y += sv.y * dt; hero.rotation.z += sv.z * dt;
-    hero.position.set(S.pos.x + 1.0, lerp(hero.position.y, h - 0.35, 1 - Math.exp(-3 * dt)), S.pos.z);
-    rig.position.set(S.pos.x - 1.2, h + 0.06, S.pos.z + 0.6);
-    rig.rotateOnAxis(new V3(0, 1, 0), dt * 1.5);
-    tgt.shLz = 2.4; tgt.shRz = -2.4; tgt.hpLx = -0.8; tgt.knL = 1.2; tgt.hpRx = 0.3; tgt.knR = 0.4; tgt.spX = 0.6; tgt.hipsY = 0.95;
-    poseK = 1 - Math.exp(-6 * dt);
-    if (Math.random() < dt * 25) emit(hero.position.x, h, hero.position.z, 0, 1.5, 0, 2, 0.8);
-    if (S.wipeT <= 0) {
-      const depth = h - terrainH(S.pos.x, S.pos.z);
-      S.speed = 0; S.wx = S.wz = 0;
-      if (depth < 0.6) { S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); }
-      else enterPaddle(false);
+    // nadar para cima: depois de 0,8 s, W ou ESPAÇO aumentam o empuxo
+    RD.swim = RD.t > 0.8 && (ay > 0 || keys.Space) ? 0.7 : 0;
+    rdUpdate(dt);
+    const pel = RD.p[RI.pel], che = RD.p[RI.che];
+    S.pos.set(pel.x, 0, pel.z);
+    S.vx = (pel.x - RD.o[RI.pel].x) / RD_H; S.vz = (pel.z - RD.o[RI.pel].z) / RD_H;
+    const h = waterH(pel.x, pel.z);
+    // respingo quando alguma parte do corpo fura a superfície rápido
+    for (let i = 0; i < 15; i += 2) {
+      const p = RD.p[i], o = RD.o[i], vy = (p.y - o.y) / RD_H;
+      if (Math.abs(p.y - RD.wh[i]) < 0.15 && Math.abs(vy) > 1.2 && Math.random() < dt * 20) emit(p.x, RD.wh[i], p.z, 0, 1.2 + Math.abs(vy) * 0.3, 0, 3, 0.6);
     }
-    setHint('Segura o fôlego…'); setMode('Vaca', 'wipe');
-    focus.set(S.pos.x, h + 0.8, S.pos.z);
+    const under = che.y < RD.wh[RI.che] - 0.25;
+    if (under && Math.random() < dt * 12) emitFoam(che.x + rs(0.3), che.z + rs(0.3), 0, -1, 1, 0.4, 1);
+    if ((RD.t > 2.0 && !under && RD.wf[RI.che] < 0.7) || (RD.t > 3.2 && !under) || RD.t > 5.5) rdEnd();
+    if (S.mode === 'wipe') {
+      setHint(RD.t < 2.0 ? 'Segura o fôlego… ' + (2.0 - RD.t).toFixed(1).replace('.', ',') + ' s' : under ? 'Nade para cima: <b>W</b> ou <b>ESPAÇO</b>' : 'Subindo na prancha…');
+      setMode('Vaca', 'wipe'); hud.wave.textContent = '';
+    }
+    focus.set(pel.x, Math.max(h, pel.y) + 0.8, pel.z);
     camFollow(dt, focus, null, 8);
   }
-  applyPose(tgt, poseK);
+  if (S.mode !== 'wipe') applyPose(tgt, poseK);
+  recoverBlend(dt);
 
   // HUD
   const curPts = S.ride ? S.ride.pts : 0;
@@ -1818,7 +2176,7 @@ function step(dt) {
 
   if (IS_TOUCH) {
     const a = S.mode === 'ride' ? 'Sair' : S.hasBoard ? 'Largar' : 'Prancha';
-    const j = S.mode === 'paddle' ? 'Em pé' : S.mode === 'ride' || S.mode === 'air' ? 'Aéreo' : 'Pular';
+    const j = S.mode === 'paddle' ? (S.canCatch ? 'Em pé' : 'Furar') : S.mode === 'ride' || S.mode === 'air' ? 'Aéreo' : 'Pular';
     if (touchLbl.a !== a) { touchLbl.a = a; $('tAct').textContent = a; }
     if (touchLbl.j !== j) { touchLbl.j = j; $('tJump').textContent = j; }
   }
@@ -1838,6 +2196,16 @@ function camBlocked(f, p) {
     }
   }
   return false;
+}
+/* A câmera nunca fica embaixo d'água. Antes o piso valia só para o alvo da câmera: o lerp atrasado e o tremor
+   deixavam a câmera de verdade para trás enquanto a onda subia (vários m/s na parede) e a água sumia, porque a
+   superfície só tinha face de cima. Agora o piso vale para a posição final, olhando a água num raio de 0,9 m
+   (o plano de corte da lente também não pode encostar) com 0,55 m de folga. */
+function keepCamAboveWater() {
+  const p = camera.position, r = 0.9;
+  const wmax = Math.max(waterH(p.x, p.z), waterH(p.x + r, p.z), waterH(p.x - r, p.z), waterH(p.x, p.z + r), waterH(p.x, p.z - r));
+  const floor = Math.max(terrainH(p.x, p.z) + 0.5, wmax + 0.55);
+  if (p.y < floor) p.y = floor;
 }
 function camFollow(dt, focus, autoYaw, dist) {
   if (autoYaw !== null && clock - lastLook > 1.6) camYaw += angDiff(autoYaw, camYaw) * (1 - Math.exp(-2.2 * dt));
@@ -1868,6 +2236,7 @@ function camFollow(dt, focus, autoYaw, dist) {
     const s = Math.min(shakeT, 1) * 0.35;
     camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; camera.position.z += (Math.random() - 0.5) * s;
   }
+  keepCamAboveWater();
   if (tube > 0.01 && S.mode === 'ride') camera.lookAt(focus.x + tdx * 5 * tube, focus.y, focus.z - 0.3 * tube);
   else camera.lookAt(focus);
   const moving = S.mode === 'ride' || S.mode === 'air';
@@ -1946,6 +2315,7 @@ if (HAS_POST) {
 let dropsT = 0, shakeT = 0;
 const _sv = new V3();
 function renderFrame(dt) {
+  waterU.uUnder.value = camera.position.y < waterH(camera.position.x, camera.position.z) ? 1 : 0;
   sprayU.uScale.value = renderer.domElement.height * 0.5 / Math.tan(camera.fov * Math.PI / 360);
   const q = QUAL[CFG.quality];
   const usePost = composer && q.post && (CFG.bloom || CFG.flare || CFG.rays || CFG.grain || CFG.drops);
@@ -2017,6 +2387,9 @@ function applyQuality() {
 }
 function waveLabel() { return '≈ ' + (3.7 * CFG.waveSize).toFixed(1).replace('.', ',') + ' m · séries até ' + (3.7 * CFG.waveSize * 1.66).toFixed(1).replace('.', ',') + ' m'; }
 function syncSettingsUI() {
+  const locked = !NET.isHost && !!NET.hostCfg;
+  $('hostNote').hidden = !locked; $('waveSize').disabled = locked;
+  document.querySelectorAll('[data-type]').forEach(b => { b.disabled = locked; });
   document.querySelectorAll('[data-q]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.q === CFG.quality)));
   document.querySelectorAll('[data-type]').forEach(b => b.setAttribute('aria-pressed', String(!!CFG.types[b.dataset.type])));
   $('waveSize').value = CFG.waveSize; $('waveVal').textContent = CFG.waveSize.toFixed(1).replace('.', ',') + '×'; $('waveInfo').textContent = waveLabel();
@@ -2064,6 +2437,191 @@ $('go').addEventListener('click', () => {
   setHint('Sua prancha está na areia, marcada pela seta amarela');
   canvas.focus && canvas.focus();
 });
+/* ---------- Multiplayer online ----------
+   Usa a "room" do artefato: todo mundo que está com o Maré Dourada aberto agora fica na mesma praia, pela internet
+   (sem VPN, sem rede local). Cada jogador publica o próprio estado na "presença" ~15 vezes por segundo (posição,
+   rotação, juntas do boneco, prancha, placar); quem entra depois recebe o estado de todos na hora.
+   O MAR É O MESMO PARA TODOS sem mandar uma onda sequer pela rede: as ondas já são uma conta que só depende do
+   tempo T e do número n de cada onda. Então basta todos usarem o mesmo relógio (o do anfitrião, corrigido aos
+   poucos) e as mesmas regras de ondas (tamanho e tipos do anfitrião, que é quem entrou primeiro). */
+const SEA_PERIOD = 13 * 420 * 16;          // múltiplo do período das ondas (13 s) e da maré (420 s): ~24 h
+let tShift = 0;                            // só para testes
+const NET = { room: null, user: null, on: false, joinedAt: Date.now(), clockOff: 0, offSamples: [], hostPeer: null, hostCfg: null,
+  avatars: new Map(), lastSend: 0, ev: null, evN: 0, names: {}, seenEv: {}, isHost: true, count: 1 };
+function seaTime() { return ((((Date.now() + NET.clockOff) / 1000 + tShift) % SEA_PERIOD) + SEA_PERIOD) % SEA_PERIOD; }
+function waveCfg() {
+  if (!NET.isHost && NET.hostCfg) return NET.hostCfg;
+  return { ws: CFG.waveSize, types: CFG.types };
+}
+const PEER_COLS = [[0x2fd0bc, 0xfdf6e8], [0x3d6fb6, 0xffd166], [0xe8506e, 0xfdf6e8], [0x8a5cf6, 0x2fd0bc], [0xffd166, 0x23394a], [0x3fa34d, 0xffd166], [0xff9f1c, 0x23394a], [0x2b2d42, 0xff7a59]];
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function nameTag(text) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64; const g = cv.getContext('2d');
+  const tex = new THREE.CanvasTexture(cv);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
+  spr.scale.set(1.6, 0.4, 1); spr.renderOrder = 6;
+  spr.userData.draw = (t, sub) => {
+    g.clearRect(0, 0, 256, 64);
+    g.font = '700 26px Barlow, "Segoe UI", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const w = Math.min(250, g.measureText(t).width + 28);
+    g.fillStyle = 'rgba(15,34,48,0.68)'; g.beginPath(); g.roundRect ? g.roundRect(128 - w / 2, 4, w, 36, 18) : g.rect(128 - w / 2, 4, w, 36); g.fill();
+    g.fillStyle = '#fbf6ec'; g.fillText(t, 128, 23);
+    if (sub) { g.font = '700 17px Barlow, "Segoe UI", sans-serif'; g.fillStyle = '#ffd166'; g.fillText(sub, 128, 54); }
+    tex.needsUpdate = true;
+  };
+  spr.userData.draw(text, '');
+  return spr;
+}
+function makeAvatar(peer) {
+  const cols = PEER_COLS[hashStr(peer) % PEER_COLS.length];
+  const h = makeChar(cols[0], cols[1]), b = makeBoard(), tag = nameTag('Surfista');
+  scene.add(h); scene.add(b); scene.add(tag);
+  const av = { h, b, tag, J: h.userData.J, tgt: null, fresh: true, name: '', sub: '', seen: 0, vel: new V3() };
+  NET.avatars.set(peer, av);
+  return av;
+}
+function dropAvatar(peer) {
+  const av = NET.avatars.get(peer); if (!av) return;
+  scene.remove(av.h); scene.remove(av.b); scene.remove(av.tag);
+  av.tag.material.map.dispose(); av.tag.material.dispose();
+  NET.avatars.delete(peer);
+}
+const MODE_TXT = { walk: 'na areia', paddle: 'remando', ride: 'surfando', air: 'no ar', wipe: 'tomou vaca' };
+const r2 = v => Math.round(v * 100) / 100, r3 = v => Math.round(v * 1000) / 1000;
+const _np = new V3(), _nq = new THREE.Quaternion();
+function netSend() {
+  if (!NET.room) return;
+  hero.updateMatrixWorld(true); board.updateMatrixWorld(true);
+  hero.getWorldPosition(_np); hero.getWorldQuaternion(_nq);
+  const hp = [r2(_np.x), r2(_np.y), r2(_np.z)], hq = [r3(_nq.x), r3(_nq.y), r3(_nq.z), r3(_nq.w)];
+  board.getWorldPosition(_np); board.getWorldQuaternion(_nq);
+  const bp = [r2(_np.x), r2(_np.y), r2(_np.z)], bq = [r3(_nq.x), r3(_nq.y), r3(_nq.z), r3(_nq.w)];
+  const j = []; for (const jt of JL()) { const q = jt.quaternion; j.push(r3(q.x), r3(q.y), r3(q.z), r3(q.w)); }
+  const pr = {
+    v: 1, ts: Date.now(), ja: NET.joinedAt, m: S.mode, hp, hq, bp, bq, j, hy: r3(J.hips.position.y),
+    vx: r2(S.vx || 0), vz: r2(S.vz || 0),
+    sc: [Math.round(S.total), Math.round(S.best), Math.round(S.ride ? S.ride.pts : 0)],
+    cfg: { ws: CFG.waveSize, ty: TYPE_KEYS.filter(k => CFG.types[k]).join(',') },
+    ev: NET.ev
+  };
+  NET.room.presence(pr).catch(() => { });
+}
+// eventos (vaca, tubo, aéreo…) viajam na presença: qualquer pessoa na sala pode mandar presença, sem permissão extra
+function netEvent(text, sub, bad) {
+  NET.evN++; NET.ev = { i: NET.evN, t: String(text).slice(0, 40), s: String(sub || '').slice(0, 60), b: !!bad };
+}
+function feed(html) {
+  const box = $('feed'); if (!box) return;
+  const d = document.createElement('div'); d.className = 'fd'; d.textContent = html;
+  box.appendChild(d); setTimeout(() => d.remove(), 6000);
+  while (box.children.length > 4) box.firstChild.remove();
+}
+async function resolveNames(peers) {
+  if (!NET.user || !NET.user.profiles) return;
+  const ids = peers.map(p => p.by).filter(b => b && !(b in NET.names));
+  if (!ids.length) return;
+  try { const ps = await NET.user.profiles(ids); for (const id of ids) NET.names[id] = (ps && ps[id] && ps[id].name) || ''; } catch (e) { for (const id of ids) NET.names[id] = ''; }
+}
+function peerName(p) { return (p.by && NET.names[p.by]) || ('Surfista ' + p.peer.slice(0, 3).toUpperCase()); }
+function onRoomPeers(ch) {
+  const peers = ch.peers;
+  resolveNames(peers);
+  // anfitrião = quem entrou primeiro (empate: menor rótulo). Todos chegam na mesma resposta sem conversar.
+  let host = null;
+  for (const p of peers) {
+    const ja = p.presence && typeof p.presence.ja === 'number' ? p.presence.ja : (p.isMe && p.sameTab ? NET.joinedAt : null);
+    if (ja === null) continue;
+    if (!host || ja < host.ja || (ja === host.ja && p.peer < host.peer)) host = { ja, peer: p.peer, p };
+  }
+  const me = peers.find(p => p.isMe && p.sameTab);
+  NET.isHost = !host || (me && host.peer === me.peer);
+  NET.hostPeer = host ? host.peer : null;
+  NET.count = peers.filter(p => p.kind === 'viewer').length || 1;
+  for (const p of peers) {
+    if (p.sameTab || p.kind !== 'viewer') continue;
+    const pr = p.presence; if (!pr || pr.v !== 1 || !Array.isArray(pr.hp)) continue;
+    const av = NET.avatars.get(p.peer) || makeAvatar(p.peer);
+    av.tgt = pr; av.seen = performance.now(); av.name = peerName(p);
+    if (pr.ev && typeof pr.ev.i === 'number' && NET.seenEv[p.peer] !== pr.ev.i) {
+      const first = NET.seenEv[p.peer] === undefined; NET.seenEv[p.peer] = pr.ev.i;
+      if (!first) feed(av.name + ': ' + pr.ev.t + (pr.ev.s ? ' · ' + pr.ev.s : ''));
+    }
+    // relógio do mar: amostra do anfitrião (o atraso da rede só faz subestimar, então vale a maior das amostras recentes)
+    if (!NET.isHost && p.peer === NET.hostPeer && typeof pr.ts === 'number') {
+      NET.offSamples.push(pr.ts - Date.now()); if (NET.offSamples.length > 40) NET.offSamples.shift();
+      const cfgTy = typeof (pr.cfg && pr.cfg.ty) === 'string' ? pr.cfg.ty.split(',') : null;
+      if (cfgTy) { const types = {}; for (const k of TYPE_KEYS) types[k] = cfgTy.includes(k); NET.hostCfg = { ws: clamp(+pr.cfg.ws || 1, 0.5, 2.5), types }; }
+    }
+  }
+  for (const p of ch.left) { dropAvatar(p.peer); delete NET.seenEv[p.peer]; }
+  if (NET.isHost) { NET.offSamples.length = 0; }
+  renderPlayers(peers);
+}
+function renderPlayers(peers) {
+  const box = $('players'); if (!box) return;
+  const rows = peers.filter(p => p.kind === 'viewer').map(p => {
+    const pr = p.presence || {}; const sc = Array.isArray(pr.sc) ? pr.sc : [0, 0, 0];
+    const me = p.isMe && p.sameTab;
+    return { name: me ? 'Você' : peerName(p), total: me ? S.total : (+sc[0] || 0), mode: me ? S.mode : pr.m, me, host: p.peer === NET.hostPeer };
+  }).sort((a, b) => b.total - a.total).slice(0, 8);
+  box.hidden = rows.length < 2;
+  box.textContent = '';
+  const h = document.createElement('div'); h.className = 'ph'; h.textContent = 'Na praia agora · ' + rows.length; box.appendChild(h);
+  for (const r of rows) {
+    const d = document.createElement('div'); d.className = 'pr' + (r.me ? ' me' : '');
+    const n = document.createElement('span'); n.textContent = (r.host ? '★ ' : '') + r.name; d.appendChild(n);
+    const m = document.createElement('span'); m.className = 'pm'; m.textContent = (MODE_TXT[r.mode] || '') + ' · ' + fmt(r.total); d.appendChild(m);
+    box.appendChild(d);
+  }
+}
+const _aq = new THREE.Quaternion(), _ap = new V3();
+function updateNet(dt) {
+  if (!NET.room) return;
+  // corrige o relógio devagar (no máximo 60 ms por segundo) para o mar nunca pular; diferença grande só na entrada
+  if (!NET.isHost && NET.offSamples.length >= 3) {
+    const target = Math.max(...NET.offSamples);
+    const diff = target - NET.clockOff;
+    if (Math.abs(diff) > 3000 && !NET.synced) NET.clockOff = target;
+    else NET.clockOff += clamp(diff, -60 * dt, 60 * dt);
+    NET.synced = true;
+  }
+  const now = performance.now();
+  if (now - NET.lastSend > 66) { NET.lastSend = now; netSend(); }
+  for (const [peer, av] of NET.avatars) {
+    if (now - av.seen > 15000) { dropAvatar(peer); continue; }
+    const t = av.tgt; if (!t) continue;
+    const k = av.fresh ? 1 : 1 - Math.exp(-14 * dt);
+    _ap.set(t.hp[0], t.hp[1], t.hp[2]);
+    if (av.h.position.distanceToSquared(_ap) > 400) av.h.position.copy(_ap); else av.h.position.lerp(_ap, k);
+    if (Array.isArray(t.hq)) { _aq.set(t.hq[0], t.hq[1], t.hq[2], t.hq[3]).normalize(); av.h.quaternion.slerp(_aq, k); }
+    if (Array.isArray(t.bp)) { _ap.set(t.bp[0], t.bp[1], t.bp[2]); if (av.b.position.distanceToSquared(_ap) > 400) av.b.position.copy(_ap); else av.b.position.lerp(_ap, k); }
+    if (Array.isArray(t.bq)) { _aq.set(t.bq[0], t.bq[1], t.bq[2], t.bq[3]).normalize(); av.b.quaternion.slerp(_aq, k); }
+    const JLs = [av.J.hips, av.J.spine, av.J.head, av.J.shL, av.J.elL, av.J.shR, av.J.elR, av.J.hipL, av.J.knL, av.J.hipR, av.J.knR];
+    if (Array.isArray(t.j) && t.j.length === JLs.length * 4) JLs.forEach((jt, i) => { _aq.set(t.j[i * 4], t.j[i * 4 + 1], t.j[i * 4 + 2], t.j[i * 4 + 3]); if (_aq.lengthSq() > 0.5) jt.quaternion.slerp(_aq.normalize(), k); });
+    if (typeof t.hy === 'number') av.J.hips.position.y = lerp(av.J.hips.position.y, clamp(t.hy, 0.2, 1.2), k);
+    av.fresh = false;
+    // nome em cima da cabeça, com o que a pessoa está fazendo
+    av.J.head.getWorldPosition(_ap);
+    av.tag.position.set(_ap.x, Math.max(_ap.y, waterH(_ap.x, _ap.z)) + 0.75, _ap.z);
+    const sub = t.m === 'ride' || t.m === 'air' ? (MODE_TXT[t.m] + (Array.isArray(t.sc) && t.sc[2] ? ' · ' + fmt(t.sc[2]) : '')) : (MODE_TXT[t.m] || '');
+    if (av.name + sub !== av.drawn) { av.drawn = av.name + sub; av.tag.userData.draw(av.name, sub); }
+    const d = camera.position.distanceTo(av.tag.position);
+    av.tag.scale.set(1.6 * clamp(d / 12, 0.7, 4), 0.4 * clamp(d / 12, 0.7, 4), 1);
+  }
+}
+async function netConnect() {
+  if (!(window.claude && typeof window.claude.use === 'function')) return;   // fora do claude.ai: só um jogador
+  let room = null;
+  try { room = await window.claude.use('room'); } catch (e) { room = null; }
+  if (!room) return;
+  try { NET.user = await window.claude.use('user'); } catch (e) { NET.user = null; }
+  NET.room = room;
+  room.onPeers(onRoomPeers, () => { NET.room = null; for (const p of [...NET.avatars.keys()]) dropAvatar(p); $('players').hidden = true; });
+  room.onConnection(c => { NET.on = c; $('net').textContent = c ? 'Online' : 'Conectando…'; $('net').className = c ? 'on' : ''; });
+  $('net').hidden = false;
+  netSend();
+}
+netConnect();
 requestAnimationFrame(frame);
 })();
 </script>

@@ -22,6 +22,8 @@ Precisa do Microsoft Edge WebView2, que já vem no Windows 10 e 11.
 | Shift | correr |
 | E | pegar ou largar a prancha · sair da onda |
 | Espaço | ficar de pé na onda · aéreo subindo a parede |
+| Espaço remando para o fundo | duck dive: fura a onda (segure para ficar embaixo) |
+| W na vaca | nadar para cima |
 | A / D | manobras (cavada, rasgada, batida, cutback) |
 | W surfando | bombear (só rende na descida) |
 | S surfando | estolar (ficar fundo no tubo) |
@@ -32,8 +34,13 @@ Precisa do Microsoft Edge WebView2, que já vem no Windows 10 e 11.
 
 ## O que tem
 
-- Sete tipos de onda: pico, direita, esquerda, fechadeira, cheia, laje e beira.
-- O lábio do tubo cai em queda livre (tempo ≈ √(2H/g)) e explode em spray quando bate na água.
+- Doze tipos de onda: pico, direita, esquerda, fechadeira, cheia, laje, beira, ponta (point break), dupla (double-up), cunha (wedge do molhe), de fora (a bomba rara da série) e surgente (sobe a areia sem quebrar, pelo número de Iribarren).
+- O lábio é o topo da própria onda: a parede do tubo nasce na face, é arremessado em queda livre (tempo ≈ √(2H/g)) e desaba em espuma quando bate na água.
+- Vaca com mini ragdoll: o corpo solto (juntas bola-e-soquete) é levado pela água, com empuxo, arrasto, espuma empurrando para a praia e o redemoinho da água branca. A prancha fica presa na cordinha.
+- Duck dive para furar a espuma e o lábio quando você rema para o fundo.
+- Regras de tubo justas: dá para estolar lá dentro; a vaca só vem se o lábio cair em você ou se o tubo desabar com você dentro.
+- Câmera que nunca entra embaixo d'água e maré contínua, sem saltos.
+- Multiplayer online quando o jogo é aberto como artefato no claude.ai: todo mundo na mesma praia e no mesmo mar, com placar. No site e no `.exe` o jogo roda em modo de um jogador.
 - Espraiamento, refluxo, maré e areia molhada baseados em Stockdon et al. (2006).
 - Manobras reconhecidas pela posição na parede, com pontos que premiam variedade.
 - Ajustes de gráficos (Baixo a Ultra), efeitos de câmera e tamanho das ondas.
