@@ -179,6 +179,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div>Na vaca: <kbd>W</kbd> nada para cima</div>
     <div>Surfando: <kbd>A</kbd>/<kbd>D</kbd> cavar, <kbd>W</kbd> bombear</div>
     <div><kbd>Espaço</kbd> subindo a parede = aéreo, gire com <kbd>A</kbd>/<kbd>D</kbd></div>
+    <div>Skim: correndo na areia molhada com a prancha, <kbd>Espaço</kbd> · no skim <kbd>Espaço</kbd> = ollie (gire com <kbd>A</kbd>/<kbd>D</kbd>)</div>
     <div><kbd>B</kbd> prancha, pinturas e desafios</div>
     <div><kbd>R</kbd> voltar para a areia</div>
   </div>
@@ -233,6 +234,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
         <label><input type="checkbox" id="fx-drops"> Gotas na câmera</label>
         <label><input type="checkbox" id="fx-mist"> Névoa da arrebentação</label>
         <label><input type="checkbox" id="fx-shake"> Tremor da câmera</label>
+        <label><input type="checkbox" id="fx-weather"> Nuvens e chuva</label>
       </div>
     </section>
     <section>
@@ -306,9 +308,10 @@ function terrainH(x, z) {
 }
 /* ---------- Ajustes salvos ---------- */
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
-const CFG = { quality: IS_TOUCH ? 'medio' : 'alto', board: 'short', paint: 'classica', beach: 'farol', waveSize: 1.0, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true, types: null };
+const CFG = { quality: IS_TOUCH ? 'medio' : 'alto', board: 'short', paint: 'classica', beach: 'farol', waveSize: 1.0, weather: true, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true, types: null };
 try { Object.assign(CFG, JSON.parse(localStorage.getItem('mare-dourada-cfg') || '{}')); } catch (e) { }
 function saveCfg() { try { localStorage.setItem('mare-dourada-cfg', JSON.stringify(CFG)); } catch (e) { } }
+if (typeof CFG.weather !== 'boolean') CFG.weather = true;
 const QUAL = {
   baixo: { label: 'Baixo', pr: 0.75, shadow: 0, water: [110, 140], lip: 80, post: false, spray: 0.5, sparkle: 0 },
   medio: { label: 'Médio', pr: 1, shadow: 1024, water: [160, 200], lip: 120, post: true, spray: 0.8, sparkle: 0.6 },
@@ -357,6 +360,27 @@ if (!BEACHES[CFG.beach]) CFG.beach = 'farol';
 
 let T = 24; // tempo do mar
 let LEVEL = 0; // nível da água na beira: negativo = recuou, positivo = subiu
+/* ---------- Vento e clima ----------
+   Tudo sai do tempo do mar T, então é igual para todos no multiplayer, sem mandar nada pela rede.
+   Vento terral (sopra da terra para o mar) segura a face da onda: ela fica mais cavada, a superfície fica lisa e o
+   vento arranca um véu de spray da crista para trás. Vento maral (do mar para a terra) empurra a crista: a onda
+   quebra mais mole, o mar fica picado e aparecem carneirinhos lá fora. Nuvens e chuva chegam e vão embora devagar. */
+const ENV = { wind: 0, kmh: 8, wz: 0, chop: 1, cloud: 0, rain: 0 };
+function windAt(t) { return clamp(0.8 * Math.sin(t * TAU / 900 + 1.3) + 0.35 * Math.sin(t * TAU / 337 + 0.4), -1, 1); }
+function windKmh(t) { return 5 + 17 * (0.5 + 0.5 * Math.sin(t * TAU / 610 + 2.1)); }
+function cloudAt(t) { return clamp(0.35 + 0.65 * Math.sin(t * TAU / 1300 + 0.7) + 0.25 * Math.sin(t * TAU / 470 + 2.0), 0, 1); }
+// quanto o vento muda o "oco" da onda (vale o vento da hora em que ela chega na bancada)
+function windHollow(t) { const w = windAt(t), k = clamp(windKmh(t) / 18, 0.3, 1.2); return w > 0 ? 0.2 * w * k : 0.32 * w * k; }
+function updateEnv() {
+  ENV.wind = windAt(T); ENV.kmh = windKmh(T);
+  const k = clamp(ENV.kmh / 18, 0.3, 1.2);
+  ENV.wz = ENV.wind * ENV.kmh / 3.6;                       // m/s ao longo de z: + = terral (para o mar)
+  ENV.chop = 1 + 0.9 * Math.max(0, -ENV.wind) * k - 0.25 * Math.max(0, ENV.wind) * k;
+  const on = CFG.weather !== false;
+  ENV.cloud = on ? cloudAt(T) : 0; ENV.rain = on ? smooth(0.72, 0.95, ENV.cloud) : 0;
+}
+let wxCloud = -1;
+const GREY_Z = new THREE.Color(0x7d8894), GREY_H = new THREE.Color(0xaab3bc);
 /* Água na praia, segundo Stockdon et al. (2006): nível médio = maré + sobrelevação na zona de arrebentação
    (setup ≈ 0,35·β·√(H·L)), mais o espraiamento de cada onda (uma língua fina que sobe a areia freada pela
    gravidade e volta como refluxo) e uma oscilação lenta que acompanha as séries (onda longa / surf beat). */
@@ -409,7 +433,7 @@ function waveParams(n) {
   let mult = 0.75 + 0.5 * hash1(n);
   if (set) mult *= 1.35;
   mult *= ty.size * Math.min(cfg.ws, B.max) * B.mult;
-  p = { n, set, type, ty, mult, height: 3.7 * mult, ph2: ((n * 1.3) % TAU + TAU) % TAU, hAdd: B.hAdd, zAdd: B.zAdd, zMax: B.zMax, shB: B.shB };
+  p = { n, set, type, ty, mult, height: 3.7 * mult, ph2: ((n * 1.3) % TAU + TAU) % TAU, hAdd: B.hAdd, wH: windHollow(n * P + 25), zAdd: B.zAdd, zMax: B.zMax, shB: B.shB };
   WCACHE.set(n, p);
   if (WCACHE.size > 40) for (const k of [...WCACHE.keys()]) if (k < n - 12) WCACHE.delete(k);
   return p;
@@ -447,7 +471,7 @@ function updateWaves() {
     const w = W[i];
     w.n = n; w.zc = Z0 - C * (T - n * P); w.mult = mult; w.set = set; w.type = type;
     w.ph2 = wp.ph2;
-    w.mode = ty.mode; w.vp = ty.vp; w.hollow = ty.hollow > 0 ? Math.max(0.3, ty.hollow + wp.hAdd) : 0; w.shB = wp.shB;
+    w.mode = ty.mode; w.vp = ty.vp; w.hollow = ty.hollow > 0 ? Math.max(0.3, ty.hollow + wp.hAdd + (wp.wH || 0)) : 0; w.shB = wp.shB;
     w.dir = ty.mode === 2 ? (ty.dir || (hash1(n + 5.5) < 0.5 ? -1 : 1)) : 0;
     w.close = ty.mode === 1 ? 1 : 0;
     const side = hash1(n + 21.7) < 0.5 ? -1 : 1;
@@ -457,7 +481,11 @@ function updateWaves() {
     w.zBreak = ty.zAbs ? ty.zAbs : clamp(80 + 24 * mult + ty.zOff + wp.zAdd, 60, wp.zMax);   // longe da areia; onda maior quebra mais para trás
     w.shoreW = ty.shoreW || 14;
     w.height = 3.7 * mult;
-    w.land = clamp(Math.sqrt(2 * w.height / 9.8) * 1.15, 0.6, 3.0);   // queda livre do lábio (onda gigante cai por mais tempo)
+    // queda livre do lábio (onda gigante cai por mais tempo). Perto da praia a onda que ainda não quebrou já perdeu
+    // altura pelo limite de profundidade (veja waveAt), então o lábio da quebra na beira cai de uma altura menor.
+    let Hland = w.height;
+    if (!ty.zAbs) { const dl = 1 - smooth(45, 85, w.zc); Hland = lerp(Hland, Math.min(Hland, depthCap(w.zc)), dl); }
+    w.land = clamp(Math.sqrt(2 * Hland / 9.8) * 1.15, 0.6, 3.0);
     w.e = T - (n * P + (Z0 - w.zBreak) / C);                     // tempo desde que o pico quebrou
     w.eShore = T - (n * P + (Z0 - (ty.zAbs ? 13 : 24)) / C);   // na beira tudo quebra
     wU[i].set(w.zc, w.mult, w.ph2, w.land);
@@ -474,8 +502,14 @@ function brokenAge(w, x) {
   if (w.mode === 1) spread = Math.abs(dx) * 0.012;
   else if (w.mode === 2) { const s = dx * w.dir; spread = s >= 0 ? s / w.vp : -s * 0.03; }
   else spread = Math.abs(dx) / w.vp;
-  return Math.max(w.e - spread, w.eShore);
+  // na beira tudo quebra, mas não numa linha reta perfeita: o fundo varia um pouco e a quebra anda de lado (±0,3 s)
+  return Math.max(w.e - spread, w.eShore + 0.3 * Math.sin(x * 0.045 + w.ph2 * 1.7));
 }
+/* Limite de profundidade: uma onda que ainda não quebrou não passa de ~0,8× a profundidade (γ ≈ 0,78).
+   Antes a parte da onda longe do pico chegava inteira na beira (4,9 m de parede em 0,7 m d'água) e, ao bater
+   no ponto de "tudo quebra", derretia de uma vez e o lábio que começava a cair era puxado de volta para a crista. */
+function depthCap(zc, x = 0) { return 1.0 * Math.max(0.3, -terrainH(x, zc) + LEVEL) + 0.5; }
+function smin(a, b, k) { const h = clamp(0.5 + 0.5 * (b - a) / k, 0, 1); return lerp(b, a, h) - k * h * (1 - h); }
 // lado "morto" de uma direita/esquerda: a transição para a parte oca dura 10 m (antes era um degrau no pico,
 // e a altura da parede mudava de uma coluna da malha para a outra)
 function hollowAt(w, x) { return w.mode === 2 ? w.hollow * smooth(-10, 0, (x - w.x0) * w.dir) : w.hollow; }
@@ -492,16 +526,21 @@ function waveAt(x, z, out = _wo) {
     // parede de 7 m em 1,6 s e de 22 m a 4 m em 3 s: a água "se deformava toda" na hora da quebra. Ondas normais (kF = 1) iguais.
     const kF = w.kF || 1, kB = Math.min(kF, 3), sk = Math.sqrt(kF);
     const pre = smooth(-3 * sk, 0, a);
-    const post = smooth(w.land * 0.9 * hc, w.land + 2.5 * sk, a);
+    // na beira tudo acontece mais rápido: a onda desaba e a água branca vira espraiamento em vez de seguir como morro
+    const sF = 1 - smooth(16, 30, w.zc);
+    const post = smooth(w.land * 0.9 * hc, w.land + 2.5 * sk * (1 - 0.7 * sF), a);
     amp *= 1 - 0.62 * post;
     amp *= smooth(SHORE - (w.shoreW < 5 ? 2 : 0), SHORE + w.shoreW, z);
     let lat = 0.85 + 0.15 * Math.sin(x * 0.03 + w.ph2);
     if (w.peak) { const q = (x - w.x0) / w.pw; lat *= lerp(1, 0.45 + 0.75 * Math.exp(-q * q), w.peak); }   // energia concentrada num pico
     let A = amp * w.mult * lat;
+    // limite de profundidade perto da praia (só antes de quebrar; depois o capK abaixo cuida da água branca)
+    if (w.shoreW >= 5) { const dl = 1 - smooth(45, 85, w.zc); if (dl > 0) A = lerp(A, smin(A, depthCap(w.zc, x), 0.4), dl * (1 - post)); }
     // depois de quebrar, a água branca é limitada pela profundidade (~metade do fundo): a espuma de uma onda gigante
     // não segue como um morro de 11 m até a praia. Ondas normais já ficam abaixo desse limite.
-    const capK = smooth(w.land * 0.9, w.land + 2.5 + 1.5 * (kF - 1), a);   // a montanha de espuma baixa ao longo de dezenas de metros
-    if (capK > 0) A = lerp(A, Math.min(A, 0.55 * Math.max(0.5, -terrainH(x, w.zc)) + 0.8), capK);
+    const capK = smooth(w.land * 0.9, w.land + (2.5 + 1.5 * (kF - 1)) * (1 - 0.7 * sF), a);   // a montanha de espuma baixa ao longo de dezenas de metros
+    // o piso de 0,8 m deixava um morro de ~1 m de água subindo a areia e afundando nela; na beira ele vai a ~0,2 m
+    if (capK > 0) { const D = -terrainH(x, w.zc); A = lerp(A, Math.min(A, lerp(0.55 * Math.max(0.5, D) + 0.8, 0.6 * Math.max(0.1, D) + 0.2, sF)), capK); }
     const kE = lerp(kF, Math.max(1, kF * 0.4), pre);        // a frente vai encurtando enquanto empina (costas: kB, até 3×)
     let wf = lerp(9, 3.4, Math.max(shoal * 0.55, pre)) * kE;
     wf = lerp(wf, Math.max(0.9, 0.32 * A / (0.6 + 0.4 * hl)), smooth(0, w.land * 0.6, a) * (1 - post) * hc);   // parede quase vertical sob o lábio
@@ -520,11 +559,12 @@ function waveAt(x, z, out = _wo) {
     const dk = d / Math.sqrt(kF);                             // a faixa de espuma cresce menos que a onda
     foam += impF * 1.3 + fz * (Math.exp(-((dk + 1) * (dk + 1)) / 12) + 0.7 * Math.exp(-((dk - 5) * (dk - 5)) / 60))
       + pre * (1 - br) * 0.35 * Math.exp(-(d * d) / 2) * clamp(A / 3, 0, 1)
-      + (1 - hc) * smooth(0, 0.6, a) * (1 - 0.5 * post) * 1.1 * Math.exp(-((d + 0.6) * (d + 0.6)) / 2.5);   // onda cheia esfarela pela crista
+      + (1 - hc) * smooth(0, 0.6, a) * (1 - 0.5 * post) * 1.1 * Math.exp(-((d + 0.6) * (d + 0.6)) / 2.5)   // onda cheia esfarela pela crista
+      + (d > 3 ? fz * 0.3 * Math.exp(-(d - 3) / (16 * Math.sqrt(kF))) : 0);   // rastro de espuma que a água branca deixa para trás
   }
   h += LEVEL * (1 - smooth(40, 120, z));                       // nível médio na beira
   const df = clamp((z - SHORE) / 25, 0, 1);
-  h += df * (0.16 * Math.sin(0.21 * x + 0.6 * T + 0.03 * z) + 0.11 * Math.sin(0.13 * x - 0.17 * z + 0.9 * T) + 0.07 * Math.sin(0.37 * z + 0.3 * x + 1.3 * T));
+  h += df * ENV.chop * (0.16 * Math.sin(0.21 * x + 0.6 * T + 0.03 * z) + 0.11 * Math.sin(0.13 * x - 0.17 * z + 0.9 * T) + 0.07 * Math.sin(0.37 * z + 0.3 * x + 1.3 * T));
   if (z < SHORE + 12) {                                         // língua de água subindo e descendo a areia
     const ter = terrainH(x, z);
     for (let i = 0; i < 3; i++) {
@@ -553,6 +593,7 @@ uniform vec4 uC[3];
 uniform vec4 uD[3];
 uniform float uLevel;
 uniform vec4 uS[3];
+uniform vec4 uEnv;
 const float SHORE = 12.0;
 const float GB = 0.539;
 const float Z0 = 260.0;
@@ -580,7 +621,7 @@ void waveAt(vec2 p, out float h, out float foam){
     if(b.z>1.5){ float s=dx*c.y; spread = s>=0.0 ? s/c.x : -s*0.03; }
     else if(b.z>0.5){ spread=abs(dx)*0.012; }
     else { spread=abs(dx)/c.x; }
-    float a=max(b.y-spread, b.w);
+    float a=max(b.y-spread, b.w+0.3*sin(x*0.045+w.z*1.7));
     float hl = b.z>1.5 ? c.z*smoothstep(-10.0,0.0,dx*c.y) : c.z;
     float hc=min(hl,1.0);
     float appr=clamp((Z0-z)/50.0,0.0,1.0);
@@ -588,14 +629,17 @@ void waveAt(vec2 p, out float h, out float foam){
     float amp=(1.3+2.4*shoal*shoal)*appr;
     float kF=max(dd.w,1.0), kB=min(kF,3.0), sk=sqrt(kF);
     float pre=smoothstep(-3.0*sk,0.0,a);
-    float post=smoothstep(w.w*0.9*hc,w.w+2.5*sk,a);
+    float sF=1.0-smoothstep(16.0,30.0,w.x);
+    float post=smoothstep(w.w*0.9*hc,w.w+2.5*sk*(1.0-0.7*sF),a);
     amp*=1.0-0.62*post;
     amp*=smoothstep(SHORE-(c.w<5.0?2.0:0.0),SHORE+c.w,z);
     float lat=0.85+0.15*sin(x*0.03+w.z);
     if(dd.x>0.0){ float q=(x-b.x)/dd.y; lat*=mix(1.0,0.45+0.75*exp(-q*q),dd.x); }
     float A=amp*w.y*lat;
-    float capK=smoothstep(w.w*0.9,w.w+2.5+1.5*(kF-1.0),a);
-    if(capK>0.0) A=mix(A,min(A,0.55*max(0.5,-terrainH(vec2(x,w.x)))+0.8),capK);
+    if(c.w>=5.0){ float dl=1.0-smoothstep(45.0,85.0,w.x); if(dl>0.0){ float cap=1.0*max(0.3,-terrainH(vec2(x,w.x))+uLevel)+0.5;
+      float hh=clamp(0.5+0.5*(cap-A)/0.4,0.0,1.0); float sm=mix(cap,A,hh)-0.4*hh*(1.0-hh); A=mix(A,sm,dl*(1.0-post)); } }
+    float capK=smoothstep(w.w*0.9,w.w+(2.5+1.5*(kF-1.0))*(1.0-0.7*sF),a);
+    if(capK>0.0){ float D=-terrainH(vec2(x,w.x)); A=mix(A,min(A,mix(0.55*max(0.5,D)+0.8,0.6*max(0.1,D)+0.2,sF)),capK); }
     float kE=mix(kF,max(1.0,kF*0.4),pre);
     float wf=mix(9.0,3.4,max(shoal*0.55,pre))*kE;
     wf=mix(wf,max(0.9,0.32*A/(0.6+0.4*hl)),smoothstep(0.0,w.w*0.6,a)*(1.0-post)*hc);
@@ -611,11 +655,12 @@ void waveAt(vec2 p, out float h, out float foam){
     float dk=d/sqrt(kF);
     foam+=impF*1.3+fz*(exp(-((dk+1.0)*(dk+1.0))/12.0)+0.7*exp(-((dk-5.0)*(dk-5.0))/60.0))
       + pre*(1.0-br)*0.35*exp(-(d*d)/2.0)*clamp(A/3.0,0.0,1.0)
-      + (1.0-hc)*smoothstep(0.0,0.6,a)*(1.0-0.5*post)*1.1*exp(-((d+0.6)*(d+0.6))/2.5);
+      + (1.0-hc)*smoothstep(0.0,0.6,a)*(1.0-0.5*post)*1.1*exp(-((d+0.6)*(d+0.6))/2.5)
+      + (d>3.0 ? fz*0.3*exp(-(d-3.0)/(16.0*sqrt(kF))) : 0.0);
   }
   h+=uLevel*(1.0-smoothstep(40.0,120.0,z));
   float df=clamp((z-SHORE)/25.0,0.0,1.0);
-  h+=df*(0.16*sin(0.21*x+0.6*uTime+0.03*z)+0.11*sin(0.13*x-0.17*z+0.9*uTime)+0.07*sin(0.37*z+0.3*x+1.3*uTime));
+  h+=df*uEnv.y*(0.16*sin(0.21*x+0.6*uTime+0.03*z)+0.11*sin(0.13*x-0.17*z+0.9*uTime)+0.07*sin(0.37*z+0.3*x+1.3*uTime));
   if(z<SHORE+12.0){
     float ter=terrainH(p);
     for(int i=0;i<3;i++){
@@ -687,7 +732,8 @@ scene.add(sun); scene.add(sun.target);
 /* Água */
 const waterU = Object.assign({
   uTime: { value: 0 }, uW: { value: wU }, uB: { value: bU }, uC: { value: cU }, uD: { value: dU }, uLevel: { value: 0 }, uS: { value: sU }, uDeep: { value: new THREE.Color() }, uShallow: { value: new THREE.Color() },
-  uFogColor: { value: new THREE.Color() }, uFogNear: { value: 140 }, uFogFar: { value: 900 }, uFar: { value: 0 }, uBase: { value: 0 }, uSparkle: { value: 1 }, uUnder: { value: 0 }
+  uFogColor: { value: new THREE.Color() }, uFogNear: { value: 140 }, uFogFar: { value: 900 }, uFar: { value: 0 }, uBase: { value: 0 }, uSparkle: { value: 1 }, uUnder: { value: 0 },
+  uEnv: { value: new THREE.Vector4(0, 1, 0, 0) }
 }, skyU);
 function makeWaterMat(far) {
   const u = Object.assign({}, waterU, { uFar: { value: far ? 1 : 0 }, uBase: { value: far ? -0.05 : 0 } });
@@ -719,6 +765,12 @@ function makeWaterMat(far) {
         float a=hash2(i), b=hash2(i+vec2(1.0,0.0)), c=hash2(i+vec2(0.0,1.0)), d=hash2(i+vec2(1.0,1.0));
         return mix(mix(a,b,f.x),mix(c,d,f.x),f.y); }
       float fbm(vec2 p){ float s=0.0, a=0.5; for(int i=0;i<4;i++){ s+=a*vnoise(p); p*=2.03; a*=0.5; } return s; }
+      vec2 hash22(vec2 p){ p=vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))); return fract(sin(p)*43758.5453); }
+      // distância até a borda da célula (Voronoi F2-F1): as bordas viram a "renda" de espuma, com buracos de água
+      float voro(vec2 p){ vec2 i=floor(p), f=fract(p); float d1=8.0, d2=8.0;
+        for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++){ vec2 g=vec2(float(x),float(y)); vec2 o=hash22(i+g); o=0.5+0.4*sin(uTime*0.5+6.2831*o);
+          vec2 r=g+o-f; float d=dot(r,r); if(d<d1){ d2=d1; d1=d; } else if(d<d2) d2=d; }
+        return sqrt(d2)-sqrt(d1); }
       void main(){
         if(uFar>0.5 && abs(vWorld.x)<398.0 && vWorld.z<318.0) discard;
         if(!gl_FrontFacing){
@@ -730,17 +782,25 @@ function makeWaterMat(far) {
         vec2 q=vWorld.xz;
         float n1=fbm(q*0.55+vec2(uTime*0.35,uTime*0.2));
         float n2=fbm(q*0.55+vec2(3.1,-uTime*0.3)+0.7);
-        vec3 n=normalize(vN+vec3((n1-0.5)*0.28,0.0,(n2-0.5)*0.28));
+        float rip=0.28*uEnv.y;                                 // maral: mar picado; terral: espelhado
+        vec3 n=normalize(vN+vec3((n1-0.5)*rip,0.0,(n2-0.5)*rip));
         vec3 V=normalize(cameraPosition-vWorld);
         float dist=length(cameraPosition-vWorld);
         float fres=0.03+0.85*pow(1.0-max(dot(n,V),0.0),4.0);
         vec3 R=reflect(-V,n); R.y=abs(R.y);
         vec3 sky=skyCol(R);
         float depth=vWorld.y-terrainH(q);
-        vec3 base=mix(uShallow,uDeep,smoothstep(0.4,7.0,depth));
+        // raso: a areia aparece através da água (absorção), depois turquesa e, no fundo, azul escuro
+        vec3 sandC=vec3(0.80,0.68,0.47)*(0.55+0.45*max(uSunDir.y,0.2))*(1.0-0.45*uEnv.z);
+        vec3 base=mix(sandC,uShallow,1.0-exp(-depth*1.7));
+        base=mix(base,uDeep,smoothstep(0.6,7.0,depth));
         float crest=clamp(vWorld.y*0.4,0.0,1.0);
         float back=pow(max(dot(-V,uSunDir)*0.5+0.5,0.0),3.0);
         base+=uShallow*crest*(0.35+0.9*back)*(1.0-0.6*smoothstep(5.0,20.0,vWorld.y));   // parede gigante é grossa: o sol só atravessa perto do topo
+        // luz atravessando a parede fina e empinada da onda (espalhamento): brilha verde-água com o sol atrás dela
+        float thin=clamp((vWorld.y-0.25)/2.2,0.0,1.0)*(1.0-0.55*smoothstep(4.0,14.0,vWorld.y))*smoothstep(0.08,0.45,1.0-vN.y);
+        float sss=pow(clamp(dot(V,-normalize(uSunDir+n*0.55)),0.0,1.0),3.0)*1.4+0.25*back;
+        base+=(uShallow*1.25+vec3(0.06,0.16,0.12))*thin*sss*(1.0-0.6*uEnv.z);
         vec3 col=mix(base,sky,fres);
         col+=uSunColor*pow(max(dot(R,uSunDir),0.0),220.0)*2.2;
         col+=uSunColor*pow(max(dot(R,uSunDir),0.0),18.0)*0.12;
@@ -751,15 +811,35 @@ function makeWaterMat(far) {
           col+=uSunColor*glint*3.5*uSparkle;
         }
         float fn=fbm(q*0.32+vec2(0.0,uTime*0.45));
-        float foam=smoothstep(0.32,0.78,vFoam*1.15*(0.45+fn));
+        // espuma: cheia onde a água branca é grossa; em volta vira uma renda (rede com buracos) que vai se abrindo
+        // coordenadas entortadas por ruído: as células ficam moles e irregulares, não azulejo
+        vec2 wq=vec2(fbm(q*0.21+vec2(0.0,uTime*0.1)),fbm(q*0.21+vec2(5.2,1.3)))-0.5;
+        vec2 fuv=q+vec2(0.0,uTime*0.35)+wq*3.2;
+        float near=1.0-smoothstep(60.0,160.0,length(cameraPosition-vWorld));   // de longe a renda some (sem serrilhado)
+        float gaps=smoothstep(0.28,0.62,fbm(q*0.85+vec2(3.0,uTime*0.2)));        // fios que se rompem
+        float web=(1.0-smoothstep(0.0,0.07+0.12*fn,voro(fuv*0.75)))*(0.35+0.65*gaps);
+        float web2=near>0.0 ? (1.0-smoothstep(0.0,0.06+0.08*fn,voro(fuv*2.3+7.3+wq*2.0)))*(0.3+0.7*gaps) : 0.5;
+        web=mix(0.55,web,0.35+0.65*near);
+        float fA=vFoam*1.15*(0.55+0.9*fn);
+        float solid=smoothstep(0.7,1.05,fA);
+        float laceF=smoothstep(0.08,0.55,fA)*max(web,web2*0.7);
+        float foam=max(solid,laceF)*(0.85+0.15*web2);
         float shore=smoothstep(0.6,0.05,depth)*smoothstep(0.35,0.75,fbm(q*0.6-vec2(0.0,uTime*0.25))+0.15);
-        float lace=smoothstep(0.55,0.6,fbm(q*1.4+vec2(uTime*0.1,0.0)))*smoothstep(1.4,0.2,depth)*0.6;
+        float lace=web*smoothstep(1.4,0.2,depth)*0.45;
+        // carneirinhos com vento maral lá fora
+        float caps=smoothstep(0.78,0.9,fbm(q*0.18+vec2(uTime*0.05,uTime*0.12)))*max(0.0,-uEnv.x)*smoothstep(25.0,70.0,q.y)*(0.45+0.55*web2);
         float swUp, swK; float zf=swashFrontAny(q.x,q.y,swUp,swK);
         float onSand=step(zf,1e2)*smoothstep(SHORE+3.0,SHORE-1.0,q.y);
         float fq=(q.y-zf)/(0.55+0.4*fn); float front=exp(-fq*fq)*swUp;
         float bubbles=smoothstep(0.62,0.7,fbm(q*3.5+vec2(0.0,uTime*0.6)))*smoothstep(4.0,0.0,q.y-zf)*swUp;
         float hatch=(1.0-swUp)*onSand*smoothstep(0.9,0.97,max(abs(sin((q.x*0.9+q.y*1.6)*1.3)),abs(sin((q.x*0.9-q.y*1.6)*1.3))))*smoothstep(0.0,3.0,q.y-zf)*0.45;
-        float fm=clamp(foam+shore+lace+front*0.95+bubbles*0.7+hatch,0.0,1.0);
+        float fm=clamp(foam+shore+lace+caps+front*0.95+bubbles*0.7+hatch,0.0,1.0);
+        // chuva: anéis de gota na água
+        if(uEnv.w>0.01 && near>0.0){
+          vec2 g=q*1.3; vec2 id=floor(g); vec2 fr=fract(g)-0.5; float rr=hash2(id); float ph=fract(uTime*1.1+rr);
+          float dd=length(fr-(hash22(id+3.1)-0.5)*0.6);
+          col+=vec3(0.75,0.82,0.88)*smoothstep(0.045,0.0,abs(dd-ph*0.42))*(1.0-ph)*uEnv.w*near*0.35;
+        }
         // lâmina fina: cor de areia molhada vista pela água e reflexo do céu
         float sheet=onSand*(1.0-smoothstep(0.02,0.35,depth));
         col=mix(col,mix(vec3(0.55,0.45,0.32),sky,0.45+0.4*fres),sheet*0.55);
@@ -868,9 +948,14 @@ buildLips(150);
 const _lw = { h: 0, foam: 0 };
 const _cu = new Float32Array(LIP_K + 1), _cy = new Float32Array(LIP_K + 1);
 function bez(p0, p1, p2, p3, t) { const u = 1 - t; return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3; }
+// altura de cada coluna no instante em que o lábio saiu: um lábio que já está caindo termina a queda mesmo que a
+// água embaixo dele baixe (na beira ela baixa rápido e o lábio sumia no meio do caminho)
+const lipMem = [0, 1, 2].map(() => ({ n: -1e9, h: new Float32Array(512) }));
 function updateLips() {
   for (let i = 0; i < 3; i++) {
     const w = W[i], m = lips[i], g = m.geometry;
+    const mem = lipMem.find(q => q.n === w.n) || lipMem.find(q => !W.some(v => v.n === q.n));
+    if (mem.n !== w.n) { mem.n = w.n; mem.h.fill(0); }
     const pos = g.attributes.position.array, al = g.attributes.aAlpha.array, fo = g.attributes.aFoam.array;
     const land = w.land;
     let any = false;
@@ -883,26 +968,35 @@ function updateLips() {
        Agora uma coluna fora da quebra só encolhe o lábio para dentro da crista (peso g → 0), e o lábio
        caído afunda abaixo da superfície enquanto some. */
     const zMin = SHORE + (w.shoreW < 5 ? 1 : 6);
-    const zW = smooth(zMin, zMin + 5, w.zc);
     for (let c = 0; c < LIP_COLS; c++) {
       const x = LIP_X0 + c * LIP_DX;
       const a = brokenAge(w, x);
       const base = c * LIP_RING;
       const hl = hollowAt(w, x), hc = Math.min(hl, 1);
       const H = waveAt(x, w.zc, _lw).h;
-      const sw = smooth(0.05, 0.4, hl) * smooth(0.9, 1.6, H) * zW * (1 - smooth(148, 158, Math.abs(x)));
+      /* Alturas do lábio medidas a partir do nível da água em volta (hB), não do zero. Na beira a água fica mais alta
+         (maré, sobrelevação, água acumulada na areia) e, com o zero como base, a "metade da face" caía 2,5 m à frente,
+         dentro da areia: a parede de dentro do tubo nascia na frente da ponta e o lábio dobrava em Z para trás. */
+      const hB = Math.min(H - 0.05, Math.max(LEVEL * (1 - smooth(40, 120, w.zc)), terrainH(x, w.zc - 2)));
+      const Hr = Math.max(H - hB, 0.05), Y = f => hB + Hr * f;
+      // a zona proibida perto da areia vale para onde o lábio COMEÇOU a cair (zc + C·a), não para onde a onda está agora:
+      // antes, um lábio no meio da queda na beira encolhia de volta para dentro da crista enquanto a onda andava 5 m.
+      const zW = smooth(zMin, zMin + 5, w.zc + C * Math.max(0, a));
+      // a quebra na beira é baixa (limite de profundidade): o lábio aparece a partir de ~0,6 m de altura
+      if (a < 0.05) mem.h[c] = Hr;
+      const sw = smooth(0.05, 0.4, hl) * smooth(0.55, 1.2, Math.max(Hr, mem.h[c])) * zW * (1 - smooth(148, 158, Math.abs(x)));
       const grow = smooth(-0.9 * Math.sqrt(w.kF || 1), 0.1, a);   // crista se inclinando antes de quebrar (a gigante começa antes)
       const g8 = sw * grow;
-      if (sw < 0.001 || a < -0.9 * Math.sqrt(w.kF || 1) || a > land + 0.5 + 0.05 * H) {
+      if (sw < 0.001 || a < -0.9 * Math.sqrt(w.kF || 1) || a > land + 0.5 + 0.05 * Hr) {
         // fora da quebra: o lábio inteiro vira um ponto escondido na crista (o mesmo limite de g8 → 0)
         for (let r = 0; r < LIP_RING; r++) { const j = (base + r) * 3; pos[j] = x; pos[j + 1] = H - 0.05; pos[j + 2] = w.zc; al[base + r] = 0; fo[base + r] = 0; }
         continue;
       }
       any = true;
       const p = clamp(a / land, 0, 1);                       // quanto o lábio já caiu
-      const colEnd = land + 0.45 + 0.05 * H;
+      const colEnd = land + 0.45 + 0.05 * Hr;
       const col = smooth(land * 0.95, colEnd, a);             // desabando em espuma (onda grande demora mais)
-      const L = H * 1.3 * (0.75 + 0.25 * hl);                 // tubo ≈ 1,3× mais largo que alto (laje: mais)
+      const L = Hr * 1.3 * (0.75 + 0.25 * hl);                 // tubo ≈ 1,3× mais largo que alto (laje: mais)
       /* O lábio é o topo da própria onda, não uma casca por cima dela ("balde"): a superfície de DENTRO nasce
          na face (a ~metade da altura, ainda dentro da água, e sai dela onde a face fica côncava) e a de FORA
          nasce nas costas da onda, passando por cima da crista. A crista da malha de água fica escondida dentro
@@ -910,14 +1004,14 @@ function updateLips() {
       let uF = 2.5;                                           // ponto da face com ~50% da altura
       // interpolado entre as amostras para variar contínuo (em degraus de 0,2 m ele pulava)
       const qs = 0.2 * (w.kF || 1), qMax = 3 * (w.kF || 1); uF = 2.5 * (w.kF || 1);
-      for (let q = qs, hPrev = H; q < qMax; q += qs) { const hq = waveAt(x, w.zc - q, _lw).h; if (hq < H * 0.5) { uF = q - qs + qs * clamp((hPrev - H * 0.5) / Math.max(hPrev - hq, 1e-4), 0, 1); break; } hPrev = hq; }
+      for (let q = qs, hPrev = H; q < qMax; q += qs) { const hq = waveAt(x, w.zc - q, _lw).h; if (hq < Y(0.5)) { uF = q - qs + qs * clamp((hPrev - Y(0.5)) / Math.max(hPrev - hq, 1e-4), 0, 1); break; } hPrev = hq; }
       const u3 = L * (0.22 + 0.73 * p);                       // ponta: velocidade horizontal constante
       const yLand = waveAt(x, w.zc - u3 * g8, _lw).h + 0.05;
-      const y3 = lerp(H * 0.9, yLand, p * p);                 // ponta: queda livre (parábola)
+      const y3 = lerp(Y(0.9), yLand, p * p);                 // ponta: queda livre (parábola)
       // costas (fora) e parede do tubo (dentro), com a mesma ponta
-      const o0u = -2.0, o0y = H - 0.15, o1u = L * 0.4 * (0.4 + 0.6 * p), o1y = H * (1.03 + 0.05 * p), o2u = L * (0.3 + 0.8 * p), o2y = H * (1 - 0.4 * p);
-      const i0u = uF, i0y = H * 0.45, i1u = uF * 0.6 + L * 0.06 * p, i1y = H * (0.93 + 0.08 * p), i2u = L * (0.2 + 0.62 * p), i2y = H * (0.84 - 0.45 * p);
-      const tipT = 0.03 + 0.04 * H * (1 - p * 0.5);         // espessura da ponta
+      const o0u = -2.0, o0y = H - 0.15, o1u = L * 0.4 * (0.4 + 0.6 * p), o1y = Y(1.03 + 0.05 * p), o2u = L * (0.3 + 0.8 * p), o2y = Y(1 - 0.4 * p);
+      const i0u = uF, i0y = Y(0.45), i1u = uF * 0.6 + L * 0.06 * p, i1y = Y(0.93 + 0.08 * p), i2u = L * (0.2 + 0.62 * p), i2y = Y(0.84 - 0.45 * p);
+      const tipT = 0.03 + 0.04 * Hr * (1 - p * 0.5);         // espessura da ponta
       const roll = col * L * 0.25;                            // a espuma rola para a frente ao desabar
       const alpha = (1 - smooth(0.45, 0.95, col)) * Math.min(1, g8 * 2.5);
       for (let k = 0; k <= LIP_K; k++) {
@@ -962,9 +1056,11 @@ function lipSpray(dt) {
       const x = -150 + Math.random() * 300, a = brokenAge(w, x);
       if (a > -0.1 || a < -3.5) continue;
       const H = waveAt(x, w.zc, _lw).h; if (H < 2.2) continue;
-      if (Math.random() < dt * 6 * (H - 2) * smooth(-3.5, -0.5, a)) {
-        emit(x, H + 0.1, w.zc - 0.2, rs(0.4), 1.2 + Math.random(), 3.5 + Math.random() * 2, 2, 0.3);
-        emitMist(x, H + 0.4, w.zc + 0.5, 0, 0.6, 3, 1, 0.8, 1.6 + H * 0.2);
+      // terral forte = véu de spray voando para trás da crista; maral quase não arranca nada
+      const off = Math.max(0, ENV.wind) * clamp(ENV.kmh / 18, 0.3, 1.3);
+      if (Math.random() < dt * 6 * (H - 2) * smooth(-3.5, -0.5, a) * (0.3 + 2.2 * off)) {
+        emit(x, H + 0.1, w.zc - 0.2, rs(0.4), 1.2 + Math.random() + off, 2 + Math.random() * 2 + Math.max(0, ENV.wz) * 0.8, 2, 0.3);
+        emitMist(x, H + 0.4, w.zc + 0.5, 0, 0.6 + off * 0.8, 1.5 + Math.max(0, ENV.wz) * 0.6, 1 + (off > 0.6 ? 1 : 0), 0.8, 1.6 + H * 0.2);
       }
     }
     // 2) lábio caindo, 3) explosão, 4) espuma rolando
@@ -1552,12 +1648,12 @@ function updateSpray(dt) {
     const j = i * 3, k = spKind[i], t = 1 - spLife[i] / spMax[i];
     if (k === 0) {
       spVel[j + 1] -= 9.8 * dt;
-      const dr = Math.exp(-0.25 * dt); spVel[j] *= dr; spVel[j + 2] *= dr;
+      const dr = Math.exp(-0.25 * dt); spVel[j] *= dr; spVel[j + 2] = spVel[j + 2] * dr + ENV.wz * 0.3 * dt;
       spPos[j] += spVel[j] * dt; spPos[j + 1] += spVel[j + 1] * dt; spPos[j + 2] += spVel[j + 2] * dt;
       spAlpha[i] = spA0[i] * Math.min(1, spLife[i] / 0.3);
       if (spPos[j + 1] < -0.5 && spVel[j + 1] < 0 && (i & 7) === 0) { /* algumas viram névoa ao bater */ }
     } else if (k === 1) {
-      const dr = Math.exp(-1.6 * dt); spVel[j] *= dr; spVel[j + 1] = spVel[j + 1] * dr + 0.35 * dt; spVel[j + 2] = spVel[j + 2] * dr + 0.4 * dt;
+      const dr = Math.exp(-1.6 * dt); spVel[j] *= dr; spVel[j + 1] = spVel[j + 1] * dr + 0.35 * dt; spVel[j + 2] = spVel[j + 2] * dr + (0.15 + ENV.wz * 0.25) * dt;   // a névoa vai com o vento
       spPos[j] += spVel[j] * dt; spPos[j + 1] += spVel[j + 1] * dt; spPos[j + 2] += spVel[j + 2] * dt;
       spSize[i] = spS0[i] * (1 + 1.8 * t);
       spAlpha[i] = spA0[i] * smooth(0, 0.12, t) * (1 - smooth(0.45, 1, t));
@@ -1646,7 +1742,7 @@ function pop(text, sub = '', bad = false) {
   hud.pops.appendChild(d); setTimeout(() => d.remove(), 1800);
   while (hud.pops.children.length > 3) hud.pops.firstChild.remove();
   // os outros jogadores veem as suas manobras e vacas no canto da tela
-  if (/Vaca|Tub|Aéreo|Melhor|Floater|Batida|Cutback|Rasgada|Furou|Drop|Nota|Hang/.test(text) && typeof netEvent === 'function') netEvent(text, sub, bad);
+  if (/Vaca|Tub|Aéreo|Melhor|Floater|Batida|Cutback|Rasgada|Furou|Drop|Nota|Hang|Ollie|Wrap|Giro/.test(text) && typeof netEvent === 'function') netEvent(text, sub, bad);
 }
 const fmt = n => Math.round(n).toLocaleString('pt-BR');
 
@@ -1694,7 +1790,7 @@ function updateAudio(dt) {
   audio.surfG.gain.setTargetAtTime(muted ? 0 : 0.05 + Math.min(crash, 1.4) * 0.22, t, 0.3);
   audio.surfF.frequency.setTargetAtTime(500 + Math.min(crash, 1.2) * 900, t, 0.3);
   audio.hissG.gain.setTargetAtTime(muted ? 0 : (S.mode === 'ride' ? clamp(speed / 18, 0, 1) * 0.07 : 0), t, 0.15);
-  audio.windG.gain.setTargetAtTime(muted ? 0 : 0.025 + 0.02 * Math.sin(t * 0.3) + (S.mode === 'air' ? 0.05 : 0), t, 0.5);
+  audio.windG.gain.setTargetAtTime(muted ? 0 : 0.02 + 0.035 * clamp(ENV.kmh / 22, 0, 1) + 0.05 * ENV.rain + 0.02 * Math.sin(t * 0.3) + (S.mode === 'air' ? 0.05 : 0), t, 0.5);
 }
 
 /* ---------- Iluminação / hora do dia ---------- */
@@ -1706,6 +1802,7 @@ function applyPreset(k) {
   scene.fog.color.set(p.horizon);
   sun.color.set(p.light); sun.intensity = p.lightI; hemi.color.set(p.hemiSky); hemi.groundColor.set(p.hemiGround); hemi.intensity = p.hemiI;
   for (const c of clouds) c.material.color.set(p.cloud);
+  wxCloud = -1;
   $('bTime').textContent = (k === 'dusk' ? 'Meio-dia' : 'Fim de tarde') + ' (T)';
   document.querySelector('.eyebrow').textContent = 'Praia do Farol · ' + p.name.toLowerCase();
 }
@@ -1713,6 +1810,22 @@ applyPreset('dusk');
 $('bTime').addEventListener('click', () => applyPreset(presetKey === 'dusk' ? 'noon' : 'dusk'));
 $('bSound').addEventListener('click', toggleMute);
 $('bHelp').addEventListener('click', () => { $('help').hidden = !$('help').hidden; });
+function applyWeather() {
+  const p = PRESETS[presetKey], c = ENV.cloud, r = ENV.rain;
+  if (Math.abs(c - wxCloud) < 0.003) return; wxCloud = c;
+  const g = c * 0.75;
+  skyU.uZenith.value.set(p.zenith).lerp(GREY_Z, g);
+  skyU.uHorizon.value.set(p.horizon).lerp(GREY_H, g * 0.85);
+  skyU.uSunColor.value.set(p.sunColor).multiplyScalar(1 - 0.7 * c);
+  const hz = skyU.uHorizon.value;
+  for (const m of [water.material, farWater.material]) m.uniforms.uFogColor.value.copy(hz);
+  waterU.uFogColor.value.copy(hz); scene.fog.color.copy(hz);
+  scene.fog.near = lerp(140, 50, r); scene.fog.far = lerp(900, 380, r);
+  waterU.uFogNear.value = scene.fog.near; waterU.uFogFar.value = scene.fog.far;
+  for (const m of [water.material, farWater.material]) { m.uniforms.uFogNear.value = scene.fog.near; m.uniforms.uFogFar.value = scene.fog.far; }
+  sun.intensity = p.lightI * (1 - 0.6 * c); hemi.intensity = p.hemiI * (1 + 0.25 * c);
+  for (const cl of clouds) { cl.material.color.set(p.cloud).lerp(GREY_Z, c * 0.8); cl.material.opacity = 0.85 + 0.15 * c; }
+}
 function toggleMute() { muted = !muted; $('bSound').textContent = 'Som: ' + (muted ? 'desligado' : 'ligado') + ' (M)'; }
 
 /* ---------- Pontos, combo e notas dos juízes ----------
@@ -1750,6 +1863,7 @@ const CHALLENGES = [
   { k: 'furou5', name: 'Passando a arrebentação', desc: 'Fure 5 ondas com duck dive', goal: 5 },
   { k: 'gigante', name: 'Gigante', desc: 'Surfe uma onda de 15 m ou mais no Canhão' },
   { k: 'bico', name: 'Hang ten', desc: 'Ande no bico da Long por 2 s' },
+  { k: 'wrap', name: 'Skimboard', desc: 'Vá de skim pela areia e entre numa onda da beira' },
   { k: 'praias', name: 'Viajante', desc: 'Surfe uma onda em 3 praias diferentes', goal: 3 }
 ];
 const PROG = { done: {}, count: {}, beaches: [] };
@@ -1859,14 +1973,14 @@ function endRide(reason) {
   if (reason === 'wipe') pts *= 0.5;
   pts = Math.round(pts);
   S.total += pts;
-  if (r.time > 1) {
+  if (r.time > 1 && !r.skim) {
     const nota = judgeScore(r, reason); NOTES.push(nota); if (NOTES.length > 40) NOTES.shift();
     setTimeout(() => pop('Nota ' + fmtNota(nota), reason === 'wipe' ? 'a vaca derrubou a nota' : 'bateria ' + fmtNota(heatScore())), 400);
     if (nota >= 8) chDone('nota8');
     if (reason !== 'wipe' && r.time > 2 && pts > 0) { chDone('onda'); chBeach(r.beach || 'farol'); }
   }
   if (pts > S.best) { S.best = pts; try { localStorage.setItem('mare-dourada-best', String(pts)); } catch (e) { } if (pts > 200) pop('Melhor onda!', fmt(pts) + ' pontos'); }
-  else if (reason !== 'wipe') pop('+' + fmt(pts), reason === 'shore' ? 'até a beira' : reason === 'kick' ? 'saiu da onda' : 'a onda passou');
+  else if (reason !== 'wipe') pop('+' + fmt(pts), reason === 'skim' ? 'skim' : reason === 'shore' ? 'até a beira' : reason === 'kick' ? 'saiu da onda' : 'a onda passou');
   S.ride = null;
 }
 // kind: 'lip' (o lábio caiu em cima), 'close' (tubo/onda fechou), 'foam' (espuma), 'rail' (rabeta), 'nose' (bico enterrou), 'air'
@@ -1897,6 +2011,161 @@ function enterWalk() {
   S.mode = 'walk'; S.vx = S.vz = 0; S.vy = 0;
   scene.add(hero); hero.rotation.set(0, S.facing, 0);
   if (S.hasBoard) { hero.add(board); board.position.set(-0.36, 1.02, 0.05); board.rotation.set(0.05, 0, Math.PI / 2); }
+}
+/* ---------- Skim (skimboard) ----------
+   Na areia molhada a prancha desliza na lâmina d'água: você corre, joga a prancha e pula em cima (a corrida vira
+   impulso). A lâmina do espraiamento desliza muito; areia só molhada segura um pouco; na areia seca a prancha trava.
+   A inclinação da areia puxa para o mar. Entrando numa onda da beira com velocidade você sobe na parede e passa a
+   surfar ("wrap"). ESPAÇO = ollie, A/D no ar = giro. Surfando até a areia rápido, você continua no skim. */
+function sandWet(x, z) {
+  const xi = Math.floor((x - WET_X0) / WET_DX), zi = Math.floor((z - WET_Z0) / WET_DZ);
+  if (xi < 0 || xi >= WET_X || zi < 0 || zi >= WET_Z) return 0;
+  return wetVal[zi * WET_X + xi];
+}
+const skimH = (x, z) => Math.max(terrainH(x, z), waterH(x, z));
+function skimRig() {
+  rig.add(board); board.position.set(0, 0, 0); board.rotation.set(0, 0, 0);
+  rig.add(hero); hero.quaternion.copy(Q_STANCE); hero.position.set(0, 0.04, 0.05);
+  S.sk = { air: false, y: 0, vy: 0, spin: 0, slowT: 0, turn: 0, turnOn: false, sp0: 0 };
+  S.tubeT = 0; S.turn = null; S.tubeCam = 0;
+}
+function startSkim() {
+  const run = Math.hypot(S.vx, S.vz);
+  S.mode = 'skim';
+  S.heading = Math.atan2(S.vx, S.vz);
+  const sp = Math.min(run * 1.3 + 2.5, 13.5);                   // impulso: a corrida + o pulo em cima da prancha
+  S.vx = Math.sin(S.heading) * sp; S.vz = Math.cos(S.heading) * sp;
+  skimRig();
+  rig.position.set(S.pos.x, skimH(S.pos.x, S.pos.z) + 0.03, S.pos.z);
+  rig.quaternion.setFromAxisAngle(new V3(0, 1, 0), S.heading);
+  S.ride = newRide(); S.ride.skim = true;
+  pop('Skim!', 'impulso de ' + Math.round(sp * 3.6) + ' km/h');
+  splashSound(0.35);
+  emit(S.pos.x, skimH(S.pos.x, S.pos.z), S.pos.z, S.vx * 0.2, 1.2, S.vz * 0.2, 14, 0.7);
+}
+// vindo da onda: chegou na beira rápido e continua deslizando no espraiamento (a onda continua valendo nota)
+function toSkim() { S.mode = 'skim'; skimRig(); }
+function endSkim(reason) {
+  const sp = Math.hypot(S.vx, S.vz);
+  endRide(reason);
+  S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); S.grounded = true;
+  enterWalk();
+  S.vx = Math.sin(S.heading) * Math.min(sp, 4); S.vz = Math.cos(S.heading) * Math.min(sp, 4);   // desce correndo
+}
+function skimFall(msg) {
+  if (S.ride) endRide('wipe');
+  pop('Vaca!', msg, true); splashSound(0.6); shakeT = 0.6;
+  emit(S.pos.x, skimH(S.pos.x, S.pos.z) + 0.1, S.pos.z, S.vx * 0.3, 2, S.vz * 0.3, 30, 1.2);
+  S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); S.grounded = true;
+  enterWalk(); S.vx = S.vz = 0;
+}
+function stepSkim(dt, ax, ay, jump, act, tgt) {
+  const k = S.sk, r = S.ride; if (r) r.time += dt;
+  const x0 = S.pos.x, z0 = S.pos.z;
+  const depth = waterH(x0, z0) - terrainH(x0, z0);
+  const film = depth > 0.004;
+  const wet = film ? 1 : sandWet(x0, z0);
+  let sp = Math.hypot(S.vx, S.vz);
+  if (!k.air) {
+    // curva: mais fechada devagar
+    const dHead = -ax * 2.5 * (1 - clamp(sp / 30, 0, 0.4)) * dt;
+    S.heading += dHead; k.turn += Math.abs(dHead);
+    // gravidade na superfície (areia ou água, o que estiver por cima): a areia desce para o mar
+    const e = 0.3, s0 = skimH(x0, z0), gx = (skimH(x0 + e, z0) - s0) / e, gz = (skimH(x0, z0 + e) - s0) / e;
+    S.vx += -gx * 9.8 * 0.9 * dt; S.vz += -gz * 9.8 * 0.9 * dt;
+    sp = Math.hypot(S.vx, S.vz);
+    // atrito: lâmina d'água desliza, areia molhada segura, areia seca trava, água funda afunda a prancha
+    const mu = depth > 0.3 ? 2.5 + depth * 9 : film ? 0.3 : lerp(16, 0.9, smooth(0.3, 0.85, wet));
+    sp = Math.max(0, sp - (mu + 0.035 * sp) * dt);
+    // a quilha segura: a velocidade segue o bico
+    const vAng = Math.atan2(S.vx, S.vz), diff = angDiff(S.heading, vAng);
+    const nAng = vAng + diff * (1 - Math.exp(-5 * dt));
+    sp *= 1 - Math.min(Math.abs(diff) * 0.35 * dt, 0.5);
+    S.vx = Math.sin(nAng) * sp; S.vz = Math.cos(nAng) * sp;
+    if (Math.abs(ax) < 0.1 && sp > 0.5) S.heading += angDiff(nAng, S.heading) * (1 - Math.exp(-3 * dt));
+    S.pos.x = clamp(S.pos.x + S.vx * dt, -150, 150); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 230);
+    const y = skimH(S.pos.x, S.pos.z);
+    rig.position.set(S.pos.x, y + 0.03, S.pos.z);
+    // prancha deitada na superfície e inclinada na curva
+    vUp.set(-gx, 1, -gz).normalize();
+    vF.set(Math.sin(S.heading), 0, Math.cos(S.heading)); vF.addScaledVector(vUp, -vF.dot(vUp)).normalize();
+    vR.crossVectors(vUp, vF); tmpM.makeBasis(vR, vUp, vF); tmpQ.setFromRotationMatrix(tmpM);
+    tmpQ.multiply(new THREE.Quaternion().setFromAxisAngle(new V3(0, 0, 1), -ax * 0.4 * clamp(sp / 7, 0.2, 1)));
+    rig.quaternion.slerp(tmpQ, 1 - Math.exp(-12 * dt));
+    if (r) { r.pts += sp * dt * 3; r.top = Math.max(r.top, sp); }
+    const fx = Math.sin(S.heading), fz = Math.cos(S.heading);
+    // borrifo: a lâmina d'água espirra, a areia molhada solta grão
+    if (sp > 2.5 && Math.random() < dt * (film ? 18 : 8) * (0.4 + Math.abs(ax))) emit(S.pos.x - fx * 0.6, y + 0.05, S.pos.z - fz * 0.6, -Math.cos(S.heading) * ax * 2.5, 0.8 + sp * 0.08, Math.sin(S.heading) * ax * 2.5, film ? 3 : 1, 0.5);
+    // manobra de chão: curva forte com velocidade
+    if (Math.abs(ax) > 0.45) { if (!k.turnOn) { k.turnOn = true; k.turn = 0; k.sp0 = sp; } }
+    else if (k.turnOn) {
+      k.turnOn = false;
+      if (k.turn > 1.1 && k.sp0 > 4 && r) {
+        const n = r.moves['Power slide'] = (r.moves['Power slide'] || 0) + 1;
+        award(r, 'Power slide', Math.round(160 * clamp(k.sp0 / 8, 0.6, 1.4) * Math.pow(0.6, n - 1)));
+        emit(S.pos.x, y + 0.1, S.pos.z, -fx * 2, 2, -fz * 2, 16, 1);
+      }
+    }
+    // ollie
+    if (jump && sp > 1.5) { k.air = true; k.vy = 3.4 + sp * 0.12; k.y = y + 0.03; k.spin = 0; splashSound(0.25); emit(S.pos.x, y, S.pos.z, 0, 1.5, 0, 10, 0.7); }
+    // wrap: entrou na onda da beira subindo a parede com velocidade → passa a surfar
+    const dNow = waterH(S.pos.x, S.pos.z) - terrainH(S.pos.x, S.pos.z);
+    if (!k.air && dNow > 0.5 && sp > 3) {
+      // precisa ser uma onda de verdade: água acima do nível do mar parado (maré alta não conta) e você subindo a rampa
+      const g = grad(S.pos.x, S.pos.z), climb = S.vx * g.gx + S.vz * g.gz;
+      const elev = waterH(S.pos.x, S.pos.z) - Math.max(LEVEL * (1 - smooth(40, 120, S.pos.z)), terrainH(S.pos.x, S.pos.z));
+      if (elev > 0.45 && climb > 0.5) {
+        S.mode = 'ride'; S.carveT = 0; S.lostT = 0; S.tubeT = 0; S.turn = null; S.pumpPh = 0; S.floatT = 0;
+        S.popQ0 = hero.quaternion.clone(); S.popP0 = hero.position.clone();
+        if (!S.ride) S.ride = newRide();
+        S.ride.time = Math.max(S.ride.time, 0.6); S.ride.skim = false;
+        award(S.ride, 'Wrap na onda', 300, 'do skim para o surfe'); chDone('wrap');
+        return;
+      }
+    }
+    // fim
+    if (sp < 0.7) k.slowT += dt; else k.slowT = 0;
+    if (act) { endSkim('skim'); return; }
+    if (k.slowT > 0.3) { endSkim('skim'); if (!film && wet < 0.3) pop('Travou', 'a prancha parou na areia seca'); return; }
+    if (dNow > 0.7) { endRide('lost'); S.speed = Math.min(sp * 0.5, 3); S.wx = S.wz = 0; enterPaddle(false); return; }
+    // pose: agachado de lado, braços abertos para equilibrar
+    const crouch = 0.42 + Math.abs(ax) * 0.3;
+    tgt.hpLx = -crouch * 0.85; tgt.knL = crouch * 1.55; tgt.hpRx = -crouch * 0.85; tgt.knR = crouch * 1.55;
+    tgt.hpLz = 0.32; tgt.hpRz = -0.32; tgt.spX = 0.2 + crouch * 0.25; tgt.spY = -ax * 0.35;
+    tgt.hdY = 0.95; tgt.hdX = -0.1; tgt.shLz = 1.2 + ax * 0.3; tgt.shRz = -1.1 + ax * 0.3; tgt.elL = -0.3; tgt.elR = -0.4;
+    standHips(tgt);
+    if (!k.air) {
+      setHint('<b>A/D</b> curva · <b>ESPAÇO</b> ollie (gire no ar) · entre na onda da beira para surfar · <b>E</b> desce');
+      setMode(film ? 'Skim' : 'Skim na areia', 'ride');
+    }
+  } else {
+    // no ar
+    S.pos.x = clamp(S.pos.x + S.vx * dt, -150, 150); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 230);
+    k.vy -= 19 * dt; k.y += k.vy * dt; k.spin += -ax * 8 * dt;
+    if (r) r.pts += dt * 20;
+    rig.position.set(S.pos.x, k.y, S.pos.z);
+    const yaw = S.heading + k.spin;
+    vF.set(Math.sin(yaw), 0, Math.cos(yaw)); vUp.set(0, 1, 0); vR.crossVectors(vUp, vF);
+    tmpM.makeBasis(vR, vUp, vF); tmpQ.setFromRotationMatrix(tmpM);
+    rig.quaternion.slerp(tmpQ, 1 - Math.exp(-16 * dt));
+    tgt.hpLx = -1.1; tgt.knL = 1.8; tgt.hpRx = -1.1; tgt.knR = 1.8; tgt.hpLz = 0.3; tgt.hpRz = -0.3;
+    tgt.spX = 0.45; tgt.shLz = 1.4; tgt.shRz = -1.4; tgt.hdY = 0.85; standHips(tgt);
+    const gy = skimH(S.pos.x, S.pos.z) + 0.03;
+    if (k.y <= gy && k.vy < 0) {
+      const rem = angDiff(k.spin, 0), half = Math.round(Math.abs(k.spin) / Math.PI), deg = half * 180;
+      const clean = Math.abs(rem) < 0.7, reverse = Math.abs(Math.abs(rem) - Math.PI) < 0.7;
+      if (clean || reverse) {
+        // a prancha segue para onde ia; num giro de 180° o skim é simétrico e você só troca a base
+        const vsp = Math.hypot(S.vx, S.vz) * 0.9, vA = Math.atan2(S.vx, S.vz);
+        S.vx = Math.sin(vA) * vsp; S.vz = Math.cos(vA) * vsp;
+        S.heading = vA; k.air = false; rig.position.y = gy;
+        if (S.ride) award(S.ride, deg ? 'Giro ' + deg + '°' : 'Ollie', deg ? 220 + deg * 1.6 : 120);
+        emit(S.pos.x, gy, S.pos.z, 0, 1.6, 0, 18, 0.9); splashSound(0.4);
+      } else { skimFall('aterrissou de lado no skim'); return; }
+    }
+    setHint('<b>A/D</b> girar no ar · aterrisse alinhado');
+    setMode('No ar', 'ride');
+  }
 }
 function respawn() {
   if (S.ride) endRide('wipe');
@@ -1949,8 +2218,9 @@ function frame(now) {
 function runFrame(dt) {
   if (!(dt > 1e-4)) dt = 1e-4;   // dois quadros com o mesmo horário davam dt = 0 e a curva dividia por zero (velocidade NaN)
   clock += dt;
-  if (!window.__mareFreeze) T = seaTime(); updateWaves(); updateLevel(dt); updateWet(dt); swashFx(dt);
-  waterU.uLevel.value = LEVEL;
+  if (!window.__mareFreeze) T = seaTime(); updateEnv(); updateWaves(); updateLevel(dt); updateWet(dt); swashFx(dt);
+  waterU.uLevel.value = LEVEL; waterU.uEnv.value.set(ENV.wind, ENV.chop, ENV.cloud, ENV.rain);
+  applyWeather(); updateRain(dt);
   water.material.uniforms.uTime.value = T; farWater.material.uniforms.uTime.value = T;
   updateLips();
   if (started) step(dt); else idleCam(dt);
@@ -2022,7 +2292,15 @@ function step(dt) {
     const sp = Math.hypot(S.vx, S.vz);
     if (sp > 0.3) S.facing += angDiff(Math.atan2(S.vx, S.vz), S.facing) * (1 - Math.exp(-10 * dt));
     const g2 = terrainH(S.pos.x, S.pos.z);
-    if (jump && S.grounded) { S.vy = 5.2; S.grounded = false; }
+    // skim: com a prancha, correndo na areia molhada, ESPAÇO joga a prancha na lâmina d'água e você sobe nela
+    const wetHere = depth > 0.004 ? 1 : sandWet(S.pos.x, S.pos.z);
+    let skimGo = false;
+    if (jump && S.grounded && S.hasBoard && depth < 0.35 && S.pos.z < SHORE + 8) {
+      if (wetHere > 0.45 && sp > 2.2) skimGo = true;
+      else if (wetHere <= 0.45) pop('Areia seca', 'o skim só desliza na areia molhada');
+      else pop('Mais rápido', 'corra (Shift) antes de jogar a prancha');
+    }
+    if (jump && S.grounded && !skimGo) { S.vy = 5.2; S.grounded = false; }
     S.vy -= 16 * dt; S.y += S.vy * dt;
     if (S.y <= g2) { S.y = g2; S.vy = 0; S.grounded = true; }
     hero.position.set(S.pos.x, S.y, S.pos.z); hero.rotation.set(0, S.facing, 0);
@@ -2048,7 +2326,8 @@ function step(dt) {
       if (d < 2.4) { setHint('<b>E</b> pegar a prancha'); if (act) { S.hasBoard = true; enterWalk(); pop('Prancha na mão'); } }
       else setHint(depth > 0.6 ? 'Sem prancha não dá pra passar da arrebentação. Volte e pegue a prancha.' : 'Sua prancha está na areia, marcada pela seta amarela');
     } else {
-      setHint(depth > 0.1 ? 'Continue entrando no mar para começar a remar' : 'Leve a prancha até o mar · <b>E</b> larga na areia');
+      setHint(wetHere > 0.45 && depth < 0.35 ? 'Areia molhada: corra (<b>Shift</b>) e aperte <b>ESPAÇO</b> para o skim · ou entre no mar para remar'
+        : depth > 0.1 ? 'Continue entrando no mar para começar a remar' : 'Leve a prancha até o mar · <b>E</b> larga na areia');
       if (act && depth < 0.1) { S.hasBoard = false; boardToSand(S.pos.x + Math.cos(S.facing) * 1.2, S.pos.z - Math.sin(S.facing) * 1.2, S.facing); enterWalk(); }
       // só deita na prancha quando VOCÊ entra no mar (andando para o fundo) ou onde não dá mais pé. Antes bastava a água
       // passar de 0,8 m: a espuma e a língua d'água subindo a areia te deitavam e levantavam sozinho a cada onda
@@ -2059,6 +2338,13 @@ function step(dt) {
     else hud.wave.textContent = '';
     focus.set(S.pos.x, S.y + 1.35, S.pos.z);
     camFollow(dt, focus, null, 7.5);
+    if (skimGo) startSkim();
+  }
+  else if (S.mode === 'skim') {
+    stepSkim(dt, ax, ay, jump, act, tgt);
+    focus.set(rig.position.x, rig.position.y + 1.25, rig.position.z);
+    camFollow(dt, focus, Math.atan2(S.vx, S.vz), 7.5);
+    poseK = 1 - Math.exp(-12 * dt);
   }
   else if (S.mode === 'paddle') {
     /* Duck dive (furar a onda): ESPAÇO remando para o fundo empurra o bico para baixo e a prancha mergulha
@@ -2313,6 +2599,7 @@ function step(dt) {
     // fim da onda
     if (crashed) { const inTube = S.tubeT > 0.3; S.tubeT = 0; wipeout(closedOut ? (inTube ? 'o tubo fechou com você dentro · acelere (W) para sair antes' : 'a onda fechou em cima') : 'o lábio caiu bem na sua cabeça', closedOut ? 'close' : 'lip'); }
     else if (act && !popping) { endRide('kick'); S.speed = Math.min(sp * 0.4, 4); S.wx = S.wz = 0; enterPaddle(false); }
+    else if (depth < 0.55 && sp > 3.2) { toSkim(); pop('Skim', 'deslizando até a areia'); }
     else if (depth < 0.55) { endRide('shore'); S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); }
     else if (wfm > 0.85 && sp < 4.2 && !popping && !covered && !inPocket) wipeout('a espuma te engoliu', 'foam');
     else if (!popping && !covered && Math.abs(diff) > 1.45 * BR.tol && sp < 4.5 && Math.abs(ax) > 0.5) wipeout('a rabeta soltou na curva', 'rail');
@@ -2398,11 +2685,13 @@ function step(dt) {
   const speedNow = S.mode === 'paddle' ? Math.hypot(S.vx, S.vz) : (S.mode === 'walk' ? Math.hypot(S.vx, S.vz) : Math.hypot(S.vx, S.vz));
   hud.spd.textContent = Math.round(speedNow * 3.6);
   const tideTxt = 'Maré ' + (TIDE_RATE > 0.15 ? 'enchendo' : TIDE_RATE < -0.15 ? 'vazando' : TIDE > 0 ? 'cheia' : 'baixa') + ' · ' + (LEVEL >= 0 ? '+' : '') + LEVEL.toFixed(1).replace('.', ',') + ' m';
-  if (tideTxt !== S.tideTxt) { S.tideTxt = tideTxt; $('tide').textContent = tideTxt; }
+  const windTxt = (Math.abs(ENV.wind) < 0.15 ? 'sem vento' : (ENV.wind > 0 ? 'terral ' : 'maral ') + Math.round(ENV.kmh) + ' km/h') + (ENV.rain > 0.2 ? ' · chuva' : ENV.cloud > 0.55 ? ' · nublado' : '');
+  const envTxt = tideTxt + ' · ' + windTxt;
+  if (envTxt !== S.tideTxt) { S.tideTxt = envTxt; $('tide').textContent = envTxt; $('tide').title = ENV.wind > 0.15 ? 'Terral: ondas mais cavadas e lisas' : ENV.wind < -0.15 ? 'Maral: ondas mais moles e mar picado' : ''; }
 
   if (IS_TOUCH) {
-    const a = S.mode === 'ride' ? 'Sair' : S.hasBoard ? 'Largar' : 'Prancha';
-    const j = S.mode === 'paddle' ? (S.canCatch ? 'Em pé' : 'Furar') : S.mode === 'ride' || S.mode === 'air' ? 'Aéreo' : 'Pular';
+    const a = S.mode === 'ride' ? 'Sair' : S.mode === 'skim' ? 'Descer' : S.hasBoard ? 'Largar' : 'Prancha';
+    const j = S.mode === 'paddle' ? (S.canCatch ? 'Em pé' : 'Furar') : S.mode === 'ride' || S.mode === 'air' ? 'Aéreo' : S.mode === 'skim' ? 'Ollie' : S.hasBoard ? 'Skim' : 'Pular';
     if (touchLbl.a !== a) { touchLbl.a = a; $('tAct').textContent = a; }
     if (touchLbl.j !== j) { touchLbl.j = j; $('tJump').textContent = j; }
   }
@@ -2554,7 +2843,7 @@ function renderFrame(dt) {
   const inFront = camera.getWorldDirection(new V3()).dot(skyU.uSunDir.value) > 0;
   const edge = Math.max(Math.abs(_sv.x), Math.abs(_sv.y));
   u.uSun.value.set(_sv.x * 0.5 + 0.5, _sv.y * 0.5 + 0.5);
-  u.uSunVis.value = inFront ? (1 - smooth(1.0, 1.6, edge)) * smooth(-0.02, 0.06, skyU.uSunDir.value.y) : 0;
+  u.uSunVis.value = (inFront ? (1 - smooth(1.0, 1.6, edge)) * smooth(-0.02, 0.06, skyU.uSunDir.value.y) : 0) * (1 - 0.85 * ENV.cloud);
   u.uTint.value.copy(skyU.uSunColor.value);
   u.uFlare.value = CFG.flare ? (presetKey === 'dusk' ? 1 : 0.6) : 0;
   u.uRays.value = CFG.rays && CFG.quality !== 'medio' ? 1 : 0;
@@ -2562,6 +2851,31 @@ function renderFrame(dt) {
   dropsT = Math.max(0, dropsT - dt * 0.35);
   u.uDrops.value = CFG.drops ? smooth(0, 0.5, dropsT) : 0;
   composer.render(dt);
+}
+
+/* Chuva: riscos caindo numa caixa em volta da câmera, inclinados pelo vento */
+const RAIN_N = 1600;
+const rainPos = new Float32Array(RAIN_N * 6), rainD = new Float32Array(RAIN_N * 3);
+for (let i = 0; i < RAIN_N; i++) { rainD[i * 3] = rs(30); rainD[i * 3 + 1] = Math.random() * 26; rainD[i * 3 + 2] = rs(30); }
+const rainGeo = new THREE.BufferGeometry(); rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+const rainMat = new THREE.LineBasicMaterial({ color: 0xdde6ee, transparent: true, opacity: 0, depthWrite: false });
+const rain = new THREE.LineSegments(rainGeo, rainMat); rain.frustumCulled = false; rain.renderOrder = 7; rain.visible = false; scene.add(rain);
+function updateRain(dt) {
+  const r = ENV.rain; rain.visible = r > 0.01; if (!rain.visible) return;
+  rainMat.opacity = 0.32 * r;
+  const n = Math.floor(RAIN_N * r * Math.min(1, sprayMul())), cp = camera.position;
+  const vx = 0, vy = -11, vz = ENV.wz * 0.6;
+  for (let i = 0; i < RAIN_N; i++) {
+    const j = i * 6;
+    if (i >= n) { rainPos[j + 1] = rainPos[j + 4] = -999; continue; }
+    const d = i * 3;
+    rainD[d + 1] += vy * dt; if (rainD[d + 1] < 0) rainD[d + 1] += 26;
+    rainD[d + 2] += vz * dt; if (rainD[d + 2] > 30) rainD[d + 2] -= 60; if (rainD[d + 2] < -30) rainD[d + 2] += 60;
+    const x = cp.x + rainD[d], y = cp.y - 9 + rainD[d + 1], z = cp.z + rainD[d + 2];
+    rainPos[j] = x; rainPos[j + 1] = y; rainPos[j + 2] = z;
+    rainPos[j + 3] = x - vx * 0.045; rainPos[j + 4] = y - vy * 0.045; rainPos[j + 5] = z - vz * 0.045;
+  }
+  rainGeo.attributes.position.needsUpdate = true;
 }
 
 /* Névoa da arrebentação */
@@ -2629,7 +2943,7 @@ function syncSettingsUI() {
   document.querySelectorAll('[data-q]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.q === CFG.quality)));
   document.querySelectorAll('[data-type]').forEach(b => b.setAttribute('aria-pressed', String(!!CFG.types[b.dataset.type])));
   const wsShow = Math.min(cfgNow.ws, Bn.max); $('waveSize').value = wsShow; $('waveVal').textContent = wsShow.toFixed(1).replace('.', ',') + '×'; $('waveInfo').textContent = waveLabel();
-  for (const k of ['bloom', 'flare', 'rays', 'grain', 'drops', 'mist', 'shake']) $('fx-' + k).checked = !!CFG[k];
+  for (const k of ['bloom', 'flare', 'rays', 'grain', 'drops', 'mist', 'shake', 'weather']) $('fx-' + k).checked = !!CFG[k];
   $('postNote').hidden = !!(QUAL[CFG.quality].post && composer);
   $('postNote').textContent = composer ? 'No gráfico Baixo os efeitos de câmera ficam desligados.' : 'Os efeitos de câmera não carregaram neste aparelho.';
 }
@@ -2662,14 +2976,14 @@ document.querySelectorAll('[data-q]').forEach(b => b.addEventListener('click', (
   }
 }
 $('waveSize').addEventListener('input', e => { CFG.waveSize = +e.target.value; saveCfg(); syncSettingsUI(); });
-for (const k of ['bloom', 'flare', 'rays', 'grain', 'drops', 'mist', 'shake']) $('fx-' + k).addEventListener('change', e => { CFG[k] = e.target.checked; saveCfg(); });
+for (const k of ['bloom', 'flare', 'rays', 'grain', 'drops', 'mist', 'shake', 'weather']) $('fx-' + k).addEventListener('change', e => { CFG[k] = e.target.checked; saveCfg(); });
 $('bSet').addEventListener('click', () => openSettings());
 $('bMp').addEventListener('click', () => mpOpen());
 $('bBoard').addEventListener('click', () => boardOpen());
 $('boardClose').addEventListener('click', () => boardOpen(false));
 $('mpClose').addEventListener('click', () => mpOpen(false));
 $('setClose').addEventListener('click', () => openSettings(false));
-$('setReset').addEventListener('click', () => { Object.assign(CFG, { quality: IS_TOUCH ? 'medio' : 'alto', beach: 'farol', waveSize: 1, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true }); for (const k of TYPE_KEYS) CFG.types[k] = true; saveCfg(); applyQuality(); syncSettingsUI(); });
+$('setReset').addEventListener('click', () => { Object.assign(CFG, { quality: IS_TOUCH ? 'medio' : 'alto', beach: 'farol', waveSize: 1, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true, weather: true }); for (const k of TYPE_KEYS) CFG.types[k] = true; saveCfg(); applyQuality(); syncSettingsUI(); });
 
 function resize() {
   const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
@@ -2737,7 +3051,7 @@ function dropAvatar(peer) {
   av.tag.material.map.dispose(); av.tag.material.dispose();
   NET.avatars.delete(peer);
 }
-const MODE_TXT = { walk: 'na areia', paddle: 'remando', ride: 'surfando', air: 'no ar', wipe: 'tomou vaca' };
+const MODE_TXT = { skim: 'no skim', walk: 'na areia', paddle: 'remando', ride: 'surfando', air: 'no ar', wipe: 'tomou vaca' };
 const r2 = v => Math.round(v * 100) / 100, r3 = v => Math.round(v * 1000) / 1000;
 const _np = new V3(), _nq = new THREE.Quaternion();
 function netSend() {
