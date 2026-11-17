@@ -556,6 +556,9 @@ function updateWaves() {
     // a água branca perde força, mas só a que vai renascer apaga de vez (as outras seguem até a areia, menores)
     w.dkW = Math.max(wp.rf ? 0 : 0.45, Math.exp(-Math.max(0, w.zBreak - w.zc) / wp.Ld));
     w.foamK = wp.rf ? smooth(wp.rp.zR, wp.rp.zR + 15, w.zc) : 1;   // a espuma se desfaz antes de renascer
+    // vários picos: o trecho de cada pico abre inteiro em ~9 s, antes da onda chegar na areia
+    w.seed = hash1(n + 91.3) * TAU; w.bk = ty.mode === 2 ? 0.35 : 1;
+    w.S = ty.zAbs || ty.mode === 1 ? 0 : (ty.mode === 2 ? w.vp * (ty.x0Abs ? 14 : 9) : 2 * w.vp * 8) * (0.85 + 0.3 * hash1(n + 92.7));
     w.grow = 1; w.reform = false;
     let landK = ty.landK || 1, zAbs = ty.zAbs;
     // renasceu: daqui para a frente é outra onda (menor), que levanta do mar liso e quebra perto da areia
@@ -564,6 +567,7 @@ function updateWaves() {
       w.mult = r.mult2; w.height = 3.7 * r.mult2; w.mode = r.vp2 > 50 ? 1 : 0; w.vp = r.vp2; w.dir = 0; w.close = w.mode === 1 ? 1 : 0;
       w.hollow = r.hollow2; w.peak = 0; w.shB = 0; w.kF = 1; w.zBreak = r.zB2; w.shoreW = 14; landK = 1;
       w.x0 = clamp(w.x0 + r.dx2 * 120, -BH + 80, BH - 80); w.hw = r.hw2;
+      w.S = w.mode === 0 ? 2 * w.vp * 6 : 0; w.bk = 1;
       w.dkW = 1; w.foamK = 1; w.grow = smooth(r.zR, r.zR - 10, w.zc);   // sai da altura da água branca para a da onda nova
     }
     // queda livre do lábio (onda gigante cai por mais tempo). Perto da praia a onda que ainda não quebrou já perdeu
@@ -581,20 +585,31 @@ function updateWaves() {
     // onda maior é mais comprida (período maior), então a frente fica tão inclinada quanto a de uma onda normal.
     dU[i].set(w.peak, w.pw, w.shB, w.kF);
     eU[i].set(w.xc, w.hw, w.dkW, w.grow);
-    gU[i].set(w.foamK, 0, 0, 0);
+    gU[i].set(w.foamK, w.S, w.seed, w.bk);
   }
 }
+/* Quanto tempo depois do pico principal cada ponto da crista quebra.
+   Praia comprida tem vários picos (bancos de areia): a onda quebra em seções, cada pico abrindo o seu trecho, e
+   não como um paredão de 700 m que chega inteiro na areia. Os picos ficam a ~S metros, com posição e hora um
+   pouco diferentes. "min" entre os picos vizinhos deixa o tempo de quebra contínuo ao longo da praia. */
 function spreadAt(w, x) {
   const dx = x - w.x0;
   if (w.mode === 1) return Math.abs(dx) * 0.012;
-  if (w.mode === 2) { const s = dx * w.dir; return s >= 0 ? s / w.vp : -s * 0.03; }
+  if (w.S > 0) {
+    const k0 = Math.round(dx / w.S); let best = 1e9;
+    for (let k = k0 - 1; k <= k0 + 1; k++) {
+      const pk = k * w.S + w.S * 0.15 * Math.sin(k * 1.7 + w.seed * 2.3);
+      const sx = (dx - pk) * (w.mode === 2 ? w.dir : 1);
+      const f = (sx >= 0 ? sx / w.vp : -sx / (w.vp * w.bk)) + 1.1 * (Math.sin(k * 2.39996 + w.seed) - Math.sin(w.seed));
+      if (f < best) best = f;
+    }
+    return best;
+  }
+  if (w.mode === 2) { const sx = dx * w.dir; return sx >= 0 ? sx / w.vp : -sx * 0.03; }
   return Math.abs(dx) / w.vp;
 }
 function brokenAge(w, x) {
-  const dx = x - w.x0; let spread;
-  if (w.mode === 1) spread = Math.abs(dx) * 0.012;
-  else if (w.mode === 2) { const s = dx * w.dir; spread = s >= 0 ? s / w.vp : -s * 0.03; }
-  else spread = Math.abs(dx) / w.vp;
+  const spread = spreadAt(w, x);
   // na beira tudo quebra, mas não numa linha reta perfeita: o fundo varia um pouco e a quebra anda de lado (±0,3 s)
   return Math.max(w.e - spread, w.eShore + 0.3 * Math.sin(x * 0.045 + w.ph2 * 1.7));
 }
@@ -605,7 +620,7 @@ function depthCap(zc, x = 0) { return 1.0 * Math.max(0.3, -terrainH(x, zc) + LEV
 function smin(a, b, k) { const h = clamp(0.5 + 0.5 * (b - a) / k, 0, 1); return lerp(b, a, h) - k * h * (1 - h); }
 // lado "morto" de uma direita/esquerda: a transição para a parte oca dura 10 m (antes era um degrau no pico,
 // e a altura da parede mudava de uma coluna da malha para a outra)
-function hollowAt(w, x) { return w.mode === 2 ? w.hollow * smooth(-10, 0, (x - w.x0) * w.dir) : w.hollow; }
+function hollowAt(w, x) { return w.mode === 2 && !(w.S > 0) ? w.hollow * smooth(-10, 0, (x - w.x0) * w.dir) : w.hollow; }
 const _wo = { h: 0, foam: 0 };
 function waveAt(x, z, out = _wo) {
   let h = 0, foam = 0;
@@ -731,13 +746,20 @@ float swashFront(vec4 s, float x, out float up, out float u, out float th, out f
 void waveAt(vec2 p, out float h, out float foam){
   float x=p.x, z=p.y; h=0.0; foam=0.0;
   for(int i=0;i<3;i++){
-    vec4 w=uW[i]; vec4 b=uB[i]; vec4 c=uC[i]; vec4 dd=uD[i];
+    vec4 w=uW[i]; vec4 b=uB[i]; vec4 c=uC[i]; vec4 dd=uD[i]; vec4 gg=uG[i];
     float dx=x-b.x; float spread;
-    if(b.z>1.5){ float s=dx*c.y; spread = s>=0.0 ? s/c.x : -s*0.03; }
-    else if(b.z>0.5){ spread=abs(dx)*0.012; }
+    if(b.z>0.5 && b.z<1.5){ spread=abs(dx)*0.012; }
+    else if(gg.y>0.0){
+      float k0=floor(dx/gg.y+0.5); spread=1e9;
+      for(int j=-1;j<=1;j++){ float k=k0+float(j); float pk=k*gg.y+gg.y*0.15*sin(k*1.7+gg.z*2.3);
+        float sx=(dx-pk)*(b.z>1.5?c.y:1.0);
+        float f=(sx>=0.0? sx/c.x : -sx/(c.x*gg.w))+1.1*(sin(k*2.39996+gg.z)-sin(gg.z));
+        spread=min(spread,f); }
+    }
+    else if(b.z>1.5){ float s=dx*c.y; spread = s>=0.0 ? s/c.x : -s*0.03; }
     else { spread=abs(dx)/c.x; }
     float a=max(b.y-spread, b.w+0.3*sin(x*0.045+w.z*1.7));
-    float hl = b.z>1.5 ? c.z*smoothstep(-10.0,0.0,dx*c.y) : c.z;
+    float hl = (b.z>1.5 && gg.y<=0.0) ? c.z*smoothstep(-10.0,0.0,dx*c.y) : c.z;
     float hc=min(hl,1.0);
     float appr=clamp((Z0-z)/50.0,0.0,1.0);
     float shoal=clamp((250.0-z)/150.0+dd.z,0.0,1.0);
