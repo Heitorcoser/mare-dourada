@@ -47,6 +47,11 @@ canvas#c{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
 .tools button{font:600 12px var(--body);letter-spacing:.06em;color:var(--foam);background:var(--ink-soft);border:1px solid rgba(251,246,236,.25);border-radius:999px;padding:6px 11px;cursor:pointer}
 .tools button:hover{border-color:var(--sand)}
 .tools button:focus-visible{outline:2px solid var(--sea);outline-offset:2px}
+.tools button[aria-expanded="true"]{border-color:var(--sea);color:var(--sea)}
+#menu{pointer-events:auto;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:8px;min-width:190px}
+#menu[hidden]{display:none}
+#menu button{font:600 13px var(--body);letter-spacing:.04em;text-align:left;color:var(--foam);background:transparent;border:0;border-radius:9px;padding:8px 11px;cursor:pointer}
+#menu button:hover,#menu button:focus-visible{background:rgba(251,246,236,.1);outline:none}
 #hint{bottom:calc(22px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);font-size:16px;font-weight:600;text-align:center;max-width:min(92vw,620px);text-shadow:0 1px 6px rgba(0,0,0,.45)}
 #hint b{font-family:var(--display);font-weight:400;color:#ffd166;letter-spacing:.04em}
 #wave{bottom:calc(96px + env(safe-area-inset-bottom,0px));white-space:nowrap;left:50%;transform:translateX(-50%);font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--sand);font-weight:700;text-shadow:0 1px 6px rgba(0,0,0,.5)}
@@ -159,14 +164,18 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <span id="tide" class="tide"></span>
     <span id="net" class="off">Um jogador</span>
     <div id="players" class="panel" hidden></div>
+    <!-- só dois botões na tela: Configurações (abre o menu com o resto) e a Prancha (loja de pranchas e pinturas) -->
     <div class="tools">
-      <button id="bTime" type="button">Meio-dia (T)</button>
-      <button id="bSound" type="button">Som: ligado (M)</button>
-      <button id="bFull" type="button">Tela cheia (F)</button>
-      <button id="bHelp" type="button">Ajuda (H)</button>
-      <button id="bSet" type="button">Ajustes (O)</button>
+      <button id="bMenu" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="menu"><span aria-hidden="true">⚙ </span>Configurações</button>
       <button id="bBoard" type="button">Prancha (B)</button>
-      <button id="bMp" type="button" hidden>Multiplayer (P)</button>
+    </div>
+    <div id="menu" class="panel" role="menu" hidden>
+      <button id="bTime" type="button" role="menuitem">Meio-dia (T)</button>
+      <button id="bSound" type="button" role="menuitem">Som: ligado (M)</button>
+      <button id="bFull" type="button" role="menuitem">Tela cheia (F)</button>
+      <button id="bHelp" type="button" role="menuitem">Ajuda (H)</button>
+      <button id="bSet" type="button" role="menuitem">Ajustes (O)</button>
+      <button id="bMp" type="button" role="menuitem" hidden>Multiplayer (P)</button>
     </div>
   </div>
 
@@ -1896,6 +1905,13 @@ function applyPreset(k) {
   document.querySelector('.eyebrow').textContent = 'Praia do Farol · ' + p.name.toLowerCase();
 }
 applyPreset('dusk');
+function menuOpen(open) {
+  const m = $('menu'), on = open === undefined ? m.hidden : !!open;
+  m.hidden = !on; $('bMenu').setAttribute('aria-expanded', String(on));
+}
+$('bMenu').addEventListener('click', e => { e.stopPropagation(); menuOpen(); });
+for (const id of ['bFull', 'bHelp', 'bSet', 'bMp']) $(id).addEventListener('click', () => menuOpen(false));
+addEventListener('pointerdown', e => { if (!$('menu').hidden && !e.target.closest('#menu') && !e.target.closest('#bMenu')) menuOpen(false); });
 $('bTime').addEventListener('click', () => applyPreset(presetKey === 'dusk' ? 'noon' : 'dusk'));
 $('bSound').addEventListener('click', toggleMute);
 $('bHelp').addEventListener('click', () => { $('help').hidden = !$('help').hidden; });
@@ -2382,7 +2398,7 @@ function step(dt) {
   if (take('KeyP') && !$('bMp').hidden) mpOpen();
   if (take('KeyB')) boardOpen();
   if (take('KeyF')) goFullscreen(!document.fullscreenElement);
-  if (take('Escape')) { openSettings(false); mpOpen(false); boardOpen(false); }
+  if (take('Escape')) { openSettings(false); mpOpen(false); boardOpen(false); menuOpen(false); }
   if (S.mode !== 'ride') S.tubeCam = lerp(S.tubeCam || 0, 0, 1 - Math.exp(-3 * dt));
   if (lastCrash > 0.6) shakeT = Math.max(shakeT, clamp(lastCrash - 0.6, 0, 1) * 0.3);
   const ax = axisX(), ay = axisY();
