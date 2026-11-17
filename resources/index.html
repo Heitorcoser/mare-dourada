@@ -2173,7 +2173,8 @@ function stepSkim(dt, ax, ay, jump, act, tgt) {
     S.vx += -gx * 9.8 * 0.9 * dt; S.vz += -gz * 9.8 * 0.9 * dt;
     sp = Math.hypot(S.vx, S.vz);
     // atrito: lâmina d'água desliza, areia molhada segura, areia seca trava, água funda afunda a prancha
-    const mu = depth > 0.3 ? 2.5 + depth * 9 : film ? 0.3 : lerp(16, 0.9, smooth(0.3, 0.85, wet));
+    // na água funda a prancha PLANA enquanto tem velocidade (atrito baixo); devagar ela afunda e freia forte
+    const mu = depth > 0.3 ? (sp > 3.2 ? 2.4 + depth * 3.2 : 2.6 + depth * 4) : film ? 0.3 : lerp(16, 0.9, smooth(0.3, 0.85, wet));
     sp = Math.max(0, sp - (mu + 0.035 * sp) * dt);
     // a quilha segura: a velocidade segue o bico
     const vAng = Math.atan2(S.vx, S.vz), diff = angDiff(S.heading, vAng);
@@ -2225,7 +2226,13 @@ function stepSkim(dt, ax, ay, jump, act, tgt) {
     if (sp < 0.7) k.slowT += dt; else k.slowT = 0;
     if (act) { endSkim('skim'); return; }
     if (k.slowT > 0.3) { endSkim('skim'); if (!film && wet < 0.3) pop('Travou', 'a prancha parou na areia seca'); return; }
-    if (dNow > 0.7) { endRide('lost'); S.speed = Math.min(sp * 0.5, 3); S.wx = S.wz = 0; enterPaddle(false); return; }
+    // antes: passou de 0,7 m de água e você deitava na hora, mesmo correndo. Agora continua em pé enquanto a prancha
+    // plana; quando ela para e afunda, você desce em pé se der pé, e só deita para remar onde não dá pé
+    if (dNow > 0.55 && sp < 2.0) {
+      if (dNow < 1.25) { endSkim('skim'); pop('Afundou', 'a prancha parou na água · ande para o fundo para remar'); }
+      else { endRide('lost'); S.speed = Math.min(sp * 0.5, 2); S.wx = S.wz = 0; enterPaddle(false); }
+      return;
+    }
     // pose: agachado de lado, braços abertos para equilibrar
     const crouch = Math.min(1.2, 0.42 + Math.abs(ax) * 0.3 + 0.5 * (S.crouch || 0));
     tgt.hpLx = -crouch * 0.85; tgt.knL = crouch * 1.55; tgt.hpRx = -crouch * 0.85; tgt.knR = crouch * 1.55;
