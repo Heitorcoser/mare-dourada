@@ -162,6 +162,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div class="tools">
       <button id="bTime" type="button">Meio-dia (T)</button>
       <button id="bSound" type="button">Som: ligado (M)</button>
+      <button id="bFull" type="button">Tela cheia (F)</button>
       <button id="bHelp" type="button">Ajuda (H)</button>
       <button id="bSet" type="button">Ajustes (O)</button>
       <button id="bBoard" type="button">Prancha (B)</button>
@@ -172,6 +173,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
   <div id="help" class="hud panel" hidden>
     <h3>Comandos</h3>
     <div><kbd>W A S D</kbd> andar · <kbd>Shift</kbd> correr · <kbd>Ctrl</kbd> ou <kbd>C</kbd> abaixar (segure)</div>
+    <div><kbd>F</kbd> tela cheia: nela o <kbd>Ctrl</kbd>+<kbd>W</kbd> não fecha a aba (Chrome e Edge)</div>
     <div>Agachado no surfe: cabe em tubo menor, o lábio passa mais longe e a espuma derruba menos</div>
     <div><kbd>E</kbd> pegar ou largar a prancha</div>
     <div><kbd>Mouse</kbd> girar a câmera · <kbd>Roda</kbd> zoom</div>
@@ -344,7 +346,13 @@ const WTYPES = {
   dupla:      { name: 'Dupla',      desc: 'duas ondas somadas: grossa e oca', mode: 0, dir: 0, vp: 10, hollow: 1.35, zOff: -10, size: 1.4, peak: 0.45, pw: 30, weight: 0.6 },
   cunha:      { name: 'Cunha',      desc: 'pico alto e estreito colado no molhe', mode: 0, dir: 0, vp: 6.0, hollow: 1.25, zOff: -16, size: 1.15, peak: 1.0, pw: 16, x0Abs: 122, weight: 0.7 },
   fora:       { name: 'De fora',    desc: 'a bomba rara que quebra lá fora', mode: 0, dir: 0, vp: 9.0, hollow: 1.0, zOff: 38, size: 1.75, weight: 0.35 },
-  surgente:   { name: 'Surgente',   desc: 'sobe a areia sem quebrar', mode: 1, dir: 0, vp: 99, hollow: 0.0, zAbs: 13, size: 0.6, shoreW: 3.0, swash: 1.7, weight: 0.7 }
+  surgente:   { name: 'Surgente',   desc: 'sobe a areia sem quebrar', mode: 1, dir: 0, vp: 99, hollow: 0.0, zAbs: 13, size: 0.6, shoreW: 3.0, swash: 1.7, weight: 0.7 },
+  /* - Tubo rápido: a bancada é reta e rasa, a onda abre de lado muito depressa (ângulo de abertura pequeno).
+       O tubo corre na sua frente: só sai quem bombeia e acelera.
+     - Pipeline: bancada de coral rasa e em degrau. A onda chega de água funda e "tropeça" na laje: o lábio é jogado
+       longe e grosso (tubo largo), cai de mais alto (demora mais) e o tubo fica aberto por muito mais tempo. */
+  rapida:     { name: 'Tubo rápido', desc: 'o tubo corre muito rápido: só sai quem acelera', mode: 2, dir: 0, vp: 15, hollow: 1.3, zOff: -6, size: 1.05, weight: 0.7 },
+  pipeline:   { name: 'Pipeline',   desc: 'laje de coral: tubo longo, grosso e perfeito', mode: 2, dir: -1, vp: 9, hollow: 1.8, zOff: -10, size: 1.3, landK: 1.35, weight: 0.6 }
 };
 const TYPE_KEYS = Object.keys(WTYPES);
 /* Tipos de praia: o FUNDO decide como a onda quebra. O dono da sala (anfitrião ★) escolhe; vale a partir da próxima onda.
@@ -353,8 +361,8 @@ const TYPE_KEYS = Object.keys(WTYPES);
 const BEACHES = {
   farol:  { name: 'Praia do Farol', desc: 'areia, de tudo um pouco', max: 2.5, types: null, mult: 1, hAdd: 0, zAdd: 0, zMax: 195, shB: 0 },
   baia:   { name: 'Baía Mansa', desc: 'fundo suave: ondas cheias para treinar', max: 1.5, types: ['cheia', 'pico', 'ponta', 'beira', 'surgente'], mult: 0.75, hAdd: -0.25, zAdd: 15, zMax: 195, shB: 0 },
-  recife: { name: 'Recife da Laje', desc: 'pedra rasa: tubos grossos e rápidos', max: 3.0, types: ['laje', 'cunha', 'direita', 'esquerda', 'dupla', 'pico'], mult: 1.15, hAdd: 0.2, zAdd: -8, zMax: 195, shB: 0.1 },
-  ponta:  { name: 'Ponta do Molhe', desc: 'promontório e molhe: paredes longas', max: 2.5, types: ['ponta', 'cunha', 'direita', 'esquerda'], mult: 1, hAdd: 0, zAdd: 5, zMax: 195, shB: 0 },
+  recife: { name: 'Recife da Laje', desc: 'pedra rasa: tubos grossos e rápidos', max: 3.0, types: ['laje', 'cunha', 'direita', 'esquerda', 'dupla', 'pico', 'rapida', 'pipeline'], mult: 1.15, hAdd: 0.2, zAdd: -8, zMax: 195, shB: 0.1 },
+  ponta:  { name: 'Ponta do Molhe', desc: 'promontório e molhe: paredes longas', max: 2.5, types: ['ponta', 'cunha', 'direita', 'esquerda', 'rapida'], mult: 1, hAdd: 0, zAdd: 5, zMax: 195, shB: 0 },
   canhao: { name: 'Canhão', desc: 'um cânion no fundo junta a energia: ondas gigantes', max: 5.0, types: ['pico', 'dupla', 'fora', 'fechadeira', 'laje'], mult: 1.6, hAdd: 0.1, zAdd: 25, zMax: 205, shB: 0.45 }   // quebra a 205 m: a onda nasce a 260 m e só termina de crescer aos 210 m
 };
 const BEACH_KEYS = Object.keys(BEACHES);
@@ -489,7 +497,7 @@ function updateWaves() {
     // altura pelo limite de profundidade (veja waveAt), então o lábio da quebra na beira cai de uma altura menor.
     let Hland = w.height;
     if (!ty.zAbs) { const dl = 1 - smooth(45, 85, w.zc); Hland = lerp(Hland, Math.min(Hland, depthCap(w.zc)), dl); }
-    w.land = clamp(Math.sqrt(2 * Hland / 9.8) * 1.15, 0.6, 3.0);
+    w.land = clamp(Math.sqrt(2 * Hland / 9.8) * 1.15 * (ty.landK || 1), 0.6, 3.6);   // Pipeline: lábio cai de mais longe
     w.e = T - (n * P + (Z0 - w.zBreak) / C);                     // tempo desde que o pico quebrou
     w.eShore = T - (n * P + (Z0 - (ty.zAbs ? 13 : 24)) / C);   // na beira tudo quebra
     wU[i].set(w.zc, w.mult, w.ph2, w.land);
@@ -1425,7 +1433,8 @@ const RD_MIN = [['shL', 'haL', 0.32], ['shR', 'haR', 0.32], ['hpL', 'ftL', 0.5],
 const RD_BUOY = [1.12, 1.5, 1.25, 1.15, 1.15, 1.0, 1.0, 0.95, 0.95, 1.08, 1.08, 0.98, 0.98, 0.9, 0.9];
 const RD_H = 1 / 120;
 const RD = { on: false, t: 0, acc: 0, p: [], o: [], wh: new Float32Array(15), wf: new Float32Array(15), wv: new Float32Array(15), hp: new Float32Array(15),
-  b: new V3(), bo: new V3(), byaw: 0, spin: new V3(), swim: 0, cm: new V3() };
+  b: new V3(), bo: new V3(), byaw: 0, spin: new V3(), swim: 0, cm: new V3(),
+  carry: null, cT: new V3(), cV: new V3(), cHas: false, holdT: 2 };
 for (let i = 0; i < 15; i++) { RD.p.push(new V3()); RD.o.push(new V3()); }
 const _ra = new V3(), _rb = new V3(), _rc = new V3(), _rd = new V3(), _re = new V3(), _rm = new THREE.Matrix4();
 const _rq1 = new THREE.Quaternion(), _rq2 = new THREE.Quaternion(), _rq3 = new THREE.Quaternion(), _rq4 = new THREE.Quaternion();
@@ -1467,6 +1476,7 @@ function rdStart(vx, vy, vz, opt = {}) {
   RD.b.copy(rig.getWorldPosition(new V3())); RD.bo.set(RD.b.x - vx * RD_H * 0.8, RD.b.y - 2 * RD_H, RD.b.z - vz * RD_H * 0.8);
   RD.byaw = S.heading; RD.spin.set(-3.5 - Math.random() * 2.5, rs(1.2), rs(1.2));
   RD.t = 0; RD.acc = 0; RD.swim = 0; RD.on = true;
+  RD.carry = opt.carry || null; RD.cHas = false; RD.holdT = opt.holdT || 2;
   scene.add(hero);
   rdPose();
 }
@@ -1480,12 +1490,21 @@ function rdStep(h) {
     const wh = RD.wh[i], fo = clamp(RD.wf[i], 0, 1.4);
     const sub = clamp((wh - p.y + 0.1) / 0.3, 0, 1);       // 0 = no ar, 1 = submerso
     let ax = 0, ay = -9.8, az = 0;
-    ay += 9.8 * RD_BUOY[i] * sub * (release + RD.swim);     // empuxo (+ nadando para cima)
+    // no caldo a água branca (cheia de ar, girando) te segura embaixo: quase não há empuxo até o tempo do caldo passar
+    const buoyK = RD.carry ? 0 : RD.t < RD.holdT * 0.8 ? 0.3 : 1;
+    ay += 9.8 * RD_BUOY[i] * sub * (release + RD.swim) * buoyK;     // empuxo (+ nadando para cima)
     const kd = 0.12 + 3.2 * sub * (1 + 0.6 * fo);            // arrasto da água
     ax += -vx * kd; ay += (RD.wv[i] - vy) * kd * 0.5; az += (-C * 0.4 * fo - vz) * kd;   // a espuma empurra para a praia (bem mais devagar que a onda, que passa por cima)
-    if (sub > 0 && fo > 0.2) {                               // redemoinho da água branca
-      _ra.subVectors(p, cm); _rb.crossVectors(RD.spin, _ra); const k = fo * sub * 3.5;
+    if (sub > 0 && fo > 0.2) {                               // redemoinho da água branca (mais forte durante o caldo)
+      _ra.subVectors(p, cm); _rb.crossVectors(RD.spin, _ra); const k = fo * sub * 3.5 * (RD.t < RD.holdT ? 1.6 : 1);
       ax += _rb.x * k; ay += _rb.y * k; az += _rb.z * k;
+    }
+    if (RD.carry && RD.cHas) {
+      // levado pelo lábio: o corpo segue a ponta do lábio (mola amortecida) e rola por cima da crista
+      ax += (RD.cT.x - cm.x) * 45 + (RD.cV.x - vx) * 9;
+      ay += (RD.cT.y - cm.y) * 45 + (RD.cV.y - vy) * 9 + 9.8;
+      az += (RD.cT.z - cm.z) * 45 + (RD.cV.z - vz) * 9;
+      _ra.subVectors(p, cm); _rb.crossVectors(RD.spin, _ra); ax += _rb.x * 6; ay += _rb.y * 6; az += _rb.z * 6;
     }
     const nx = p.x + (p.x - o.x) * 0.998 + ax * h * h, ny = p.y + (p.y - o.y) * 0.998 + ay * h * h, nz = p.z + (p.z - o.z) * 0.998 + az * h * h;
     o.copy(p); p.set(nx, ny, nz);
@@ -1513,8 +1532,40 @@ function rdStep(h) {
   const ft = P[RI.ftR]; _ra.subVectors(b, ft); const ld = _ra.length();
   if (ld > 2.6) { const k = (ld - 2.6) / ld; b.addScaledVector(_ra, -k * 0.85); ft.addScaledVector(_ra, k * 0.15); }
 }
+/* Caldo ("over the falls"): o lábio te suga parede acima e te leva junto. O corpo segue a ponta de verdade do lábio
+   daquela coluna (a mesma malha que aparece na tela) até ele bater na base; aí vem a pancada para baixo e para a
+   frente, e a água branca te segura e gira por um tempo que cresce com o tamanho da onda. */
+function updateCarry(dt) {
+  const c = RD.carry; c.t += dt;
+  const i = W.findIndex(w => w.n === c.n);
+  let ok = i >= 0 && c.t < c.max;
+  if (ok) {
+    const pel = RD.p[RI.pel], w = W[i];
+    const col = clamp(Math.round((pel.x - LIP_X0) / LIP_DX), 0, LIP_COLS - 1);
+    const k = Math.round(LIP_K * 0.82), j = (col * LIP_RING + k) * 3;
+    const pos = lips[i].geometry.attributes.position.array, al = lips[i].geometry.attributes.aAlpha.array;
+    ok = lips[i].visible && al[col * LIP_RING + k] > 0.05 && brokenAge(w, pel.x) < w.land * 1.02;
+    if (ok) {
+      _rc.set(pos[j], pos[j + 1], pos[j + 2]);
+      if (RD.cHas) RD.cV.subVectors(_rc, RD.cT).multiplyScalar(1 / Math.max(dt, 1e-3)); else RD.cV.set(0, C * 0.8, -C * 0.4);
+      RD.cV.clampLength(0, 25);
+      RD.cT.copy(_rc); RD.cHas = true;
+    }
+  }
+  if (!ok) {
+    // o lábio bateu na base: pancada para baixo e para a frente, junto com a água
+    RD.carry = null;
+    const v = RD.cV, sx = clamp(v.x, -6, 6), sy = Math.min(-5, v.y * 0.8 - 3), sz = clamp(v.z, -10, 0) - 2;
+    for (let q = 0; q < 15; q++) RD.o[q].set(RD.p[q].x - sx * RD_H, RD.p[q].y - sy * RD_H, RD.p[q].z - sz * RD_H);
+    RD.spin.set(-7 - Math.random() * 3, rs(2), rs(2));
+    const pel = RD.p[RI.pel];
+    emit(pel.x, pel.y, pel.z, 0, 4, -2, 60, 2.2, 1.4); emitMist(pel.x, pel.y + 0.5, pel.z, 0, 1.5, -1, 4, 1.4, 3.5);
+    splashSound(1); shakeT = Math.max(shakeT, 1.2); dropsT = Math.max(dropsT, 1.6);
+  }
+}
 function rdUpdate(dt) {
   RD.t += dt;
+  if (RD.carry) updateCarry(dt);
   for (let i = 0; i < 15; i++) {
     const p = RD.p[i], wo = waveAt(p.x, p.z, _lw);
     RD.wv[i] = clamp((wo.h - RD.hp[i]) / Math.max(dt, 1e-3), -8, 8); RD.hp[i] = wo.h; RD.wh[i] = wo.h; RD.wf[i] = wo.foam;
@@ -1704,6 +1755,31 @@ addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 addEventListener('beforeunload', e => { if (started) { e.preventDefault(); e.returnValue = ''; } });
 // abaixar: Ctrl (qualquer lado) ou C
 const crouchKey = () => !!(keys.ControlLeft || keys.ControlRight || keys.KeyC);
+/* Tela cheia com trava de teclado (Keyboard Lock). Numa página comum NENHUM site consegue impedir o Ctrl+W de
+   fechar a aba. Em tela cheia o Chrome e o Edge deixam o jogo ficar com essas teclas: Ctrl+W vira "agachar + remar".
+   O Esc fica de fora da trava, então ele continua saindo da tela cheia normalmente. */
+const LOCK_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'KeyR', 'KeyT', 'KeyN', 'KeyC', 'KeyB', 'KeyP', 'KeyO', 'KeyH', 'KeyM', 'KeyF', 'Space'];
+let kbLocked = false, ctrlWarned = false;
+function goFullscreen(on = true) {
+  const el = document.documentElement;
+  if (on) {
+    let p = null;
+    try { if (!document.fullscreenElement && el.requestFullscreen) p = el.requestFullscreen({ navigationUI: 'hide' }); } catch (e) { }
+    const lock = () => { try { if (navigator.keyboard && navigator.keyboard.lock) navigator.keyboard.lock(LOCK_KEYS).then(() => { kbLocked = true; }, () => { }); } catch (e) { } };
+    if (p && p.then) p.then(lock, () => { }); else lock();
+  } else if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => { });
+}
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) { kbLocked = false; try { navigator.keyboard && navigator.keyboard.unlock && navigator.keyboard.unlock(); } catch (e) { } }
+  const b = document.getElementById('bFull'); if (b) b.textContent = (document.fullscreenElement ? 'Sair da tela cheia' : 'Tela cheia') + ' (F)';
+});
+// fora da tela cheia, avisa uma vez quando você segura Ctrl
+addEventListener('keydown', e => {
+  if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && started && !kbLocked && !ctrlWarned && !IS_TOUCH) {
+    ctrlWarned = true;
+    pop('Cuidado: Ctrl+W fecha a aba', 'aperte F para tela cheia (aí não fecha) ou use C para abaixar', true);
+  }
+});
 const axisX = () => clamp((keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + touchAxis.x, -1, 1);
 const axisY = () => clamp((keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) + touchAxis.y, -1, 1);
 const take = c => { const v = pressed[c]; pressed[c] = false; return v; };
@@ -1956,7 +2032,7 @@ function startRide() {
     const a = brokenAge(tw, S.pos.x), hl = hollowAt(tw, S.pos.x), front = tw.zc - S.pos.z, Hc = waveAt(S.pos.x, tw.zc, _lw).h;
     if (hl > 0.3 && a > tw.land * 0.15 && a < tw.land + 0.3 && front < Hc * 0.7) {
       S.ride = newRide();
-      rig.add(hero); wipeout('desceu junto com o lábio (por cima da bancada)'); return;
+      rig.add(hero); wipeout('desceu junto com o lábio (por cima da bancada)', 'falls'); return;
     }
     if (gl > 0.75) {
       const dhx = -g.gx / gl, dhz = -g.gz / gl;
@@ -2004,12 +2080,19 @@ function wipeout(msg, kind = 'lip') {
   const fromAir = S.mode === 'air';
   const vx = S.vx || 0, vz = S.vz || 0, vy = fromAir ? S.vy : 0;
   S.mode = 'wipe'; S.duck = null; S.rec = null;
+  // tempo de caldo: onda maior te segura mais (caldo de 1 m dura ~1,6 s; de 6 m, ~3 s)
+  const twW = nearestWave(S.pos.x, S.pos.z), Hw = twW ? Math.max(waveAt(S.pos.x, twW.zc, _lw).h, 0.5) : 1;
+  let holdT = 2, carry = null;
+  if (kind === 'falls' && twW) { carry = { n: twW.n, t: 0, max: twW.land * 1.3 + 0.6 }; holdT = clamp(1.6 + 0.24 * Hw, 1.8, 4.8); }
+  else if (kind === 'falls') kind = 'lip';
+  if (kind === 'lip' || kind === 'close') holdT = clamp(1.3 + 0.2 * Hw, 1.6, 4.2);
   let throwV, spin;
-  if (kind === 'lip' || kind === 'close') { throwV = new V3(rs(0.8), -2.5, -4.5); spin = new V3(-5 - Math.random() * 3, rs(2), rs(2)); }   // por cima da cabeça, para a praia
+  if (kind === 'falls') { throwV = new V3(0, C * 0.6, -C * 0.3); spin = new V3(-4, rs(1), rs(1)); }   // sugado parede acima
+  else if (kind === 'lip' || kind === 'close') { throwV = new V3(rs(0.8), -2.5, -4.5); spin = new V3(-5 - Math.random() * 3, rs(2), rs(2)); }   // por cima da cabeça, para a praia
   else if (kind === 'nose') { throwV = new V3(0, 1.2, Math.sign(vz || 1) * 1.5); spin = new V3(Math.sign(vz || 1) * 6, 0, rs(1)); }   // catapultado pelo bico
   else if (kind === 'rail') { throwV = new V3(Math.sign(vx || 1) * 1.5, 0.8, 0); spin = new V3(rs(1), rs(2), -Math.sign(vx || 1) * 5); }  // cai de lado
   else { throwV = new V3(0, 0.3, -1); spin = new V3(-3 - Math.random() * 2, rs(2), rs(2)); }
-  rdStart(vx, vy, vz, { throwV, spin });
+  rdStart(vx, vy, vz, { throwV, spin, carry, holdT });
   pop('Vaca!', msg, true);
   splashSound(1);
   dropsT = 1.6; shakeT = 1.0;
@@ -2282,6 +2365,7 @@ function step(dt) {
   if (take('KeyO')) openSettings();
   if (take('KeyP') && !$('bMp').hidden) mpOpen();
   if (take('KeyB')) boardOpen();
+  if (take('KeyF')) goFullscreen(!document.fullscreenElement);
   if (take('Escape')) { openSettings(false); mpOpen(false); boardOpen(false); }
   if (S.mode !== 'ride') S.tubeCam = lerp(S.tubeCam || 0, 0, 1 - Math.exp(-3 * dt));
   if (lastCrash > 0.6) shakeT = Math.max(shakeT, clamp(lastCrash - 0.6, 0, 1) * 0.3);
@@ -2440,8 +2524,12 @@ function step(dt) {
     if (tw0 && !canCatch && prot < 0.5) {
       const aw = brokenAge(tw0, S.pos.x), hlw = hollowAt(tw0, S.pos.x), Hw = waveAt(S.pos.x, tw0.zc, _lw).h, fr = tw0.zc - S.pos.z;
       const lf = 1.25 * Hw * (0.75 + 0.25 * Math.min(hlw, 1.5));
+      // na crista quando o lábio está saindo: a água sobe a parede e te leva junto por cima da bancada
+      if (hlw >= 0.5 && Hw > 1.8 && aw > 0 && aw < tw0.land * 0.6 && fr > -1.0 && fr < 0.9) {
+        wipeout('o lábio te sugou por cima da bancada · fure a onda (ESPAÇO) antes', 'falls');
+      }
       // quem está entre a crista e o ponto onde o lábio cai, na hora em que ele cai, é sugado e leva o caldo
-      if (hlw >= 0.5 && Hw > 1.8 && aw >= tw0.land * 0.85 && aw < tw0.land + 0.35 && fr > -0.5 && fr < lf + 1.0) {
+      else if (hlw >= 0.5 && Hw > 1.8 && aw >= tw0.land * 0.85 && aw < tw0.land + 0.35 && fr > -0.5 && fr < lf + 1.0) {
         wipeout('o lábio caiu na sua cabeça · aperte ESPAÇO para furar a onda', 'lip');
       }
     }
@@ -2642,7 +2730,10 @@ function step(dt) {
       S.tubeT = 0; S.tubeLow = false;
     }
     // fim da onda
-    if (crashed) { const inTube = S.tubeT > 0.3; S.tubeT = 0; wipeout(closedOut ? (inTube ? 'o tubo fechou com você dentro · acelere (W) para sair antes' : 'a onda fechou em cima') : 'o lábio caiu bem na sua cabeça', closedOut ? 'close' : 'lip'); }
+    // subiu demais na hora em que o lábio sai: a água da crista sobe e te leva junto ("over the falls")
+    const sucked = !covered && !popping && hl >= 0.5 && Hc > 1.4 && a > ld * 0.02 && a < ld * 0.6 && fFace > 0.78 && front > -0.6 && front < Hc * 0.55;
+    if (sucked && !crashed) { S.tubeT = 0; wipeout('subiu na crista na hora errada: o lábio te sugou e te jogou junto', 'falls'); }
+    else if (crashed) { const inTube = S.tubeT > 0.3; S.tubeT = 0; wipeout(closedOut ? (inTube ? 'o tubo fechou com você dentro · acelere (W) para sair antes' : 'a onda fechou em cima') : 'o lábio caiu bem na sua cabeça', closedOut ? 'close' : 'lip'); }
     else if (act && !popping) { endRide('kick'); S.speed = Math.min(sp * 0.4, 4); S.wx = S.wz = 0; enterPaddle(false); }
     else if (depth < 0.55 && sp > 1.2 && !S.proneRide) { toSkim(); pop('Skim', 'em pé, deslizando na areia'); }
     else if (depth < 0.55) { endRide('shore'); S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); }
@@ -2699,7 +2790,8 @@ function step(dt) {
   }
   else if (S.mode === 'wipe') {
     // nadar para cima: depois de 0,8 s, W ou ESPAÇO aumentam o empuxo
-    RD.swim = RD.t > 0.8 && (ay > 0 || keys.Space) ? 0.7 : 0;
+    const hT = RD.holdT || 2;
+    RD.swim = !RD.carry && RD.t > Math.max(0.8, hT * 0.8) && (ay > 0 || keys.Space) ? 0.7 : 0;
     rdUpdate(dt);
     const pel = RD.p[RI.pel], che = RD.p[RI.che];
     S.pos.set(pel.x, 0, pel.z);
@@ -2712,9 +2804,9 @@ function step(dt) {
     }
     const under = che.y < RD.wh[RI.che] - 0.25;
     if (under && Math.random() < dt * 12) emitFoam(che.x + rs(0.3), che.z + rs(0.3), 0, -1, 1, 0.4, 1);
-    if ((RD.t > 2.0 && !under && RD.wf[RI.che] < 0.7) || (RD.t > 3.2 && !under) || RD.t > 5.5) rdEnd();
+    if (!RD.carry && ((RD.t > hT && !under && RD.wf[RI.che] < 0.7) || (RD.t > hT + 1.2 && !under) || RD.t > hT + 3.5)) rdEnd();
     if (S.mode === 'wipe') {
-      setHint(RD.t < 2.0 ? 'Segura o fôlego… ' + (2.0 - RD.t).toFixed(1).replace('.', ',') + ' s' : under ? 'Nade para cima: <b>W</b> ou <b>ESPAÇO</b>' : 'Subindo na prancha…');
+      setHint(RD.carry ? '<b>O lábio te levou!</b> lá vai você junto com a onda…' : RD.t < hT ? 'Caldo! Segura o fôlego… ' + (hT - RD.t).toFixed(1).replace('.', ',') + ' s' : under ? 'Nade para cima: <b>W</b> ou <b>ESPAÇO</b>' : 'Subindo na prancha…');
       setMode('Vaca', 'wipe'); hud.wave.textContent = '';
     }
     focus.set(pel.x, Math.max(h, pel.y) + 0.8, pel.z);
@@ -3049,7 +3141,9 @@ function resize() {
 }
 addEventListener('resize', resize); applyQuality();
 
+$('bFull').addEventListener('click', () => goFullscreen(!document.fullscreenElement));
 $('go').addEventListener('click', () => {
+  if (!IS_TOUCH) goFullscreen(true);                           // entra em tela cheia (e trava o Ctrl+W) ao começar
   started = true; $('start').hidden = true; $('app').classList.remove('intro'); startAudio();
   camera.position.set(0, 3.5, -30);
   enterWalk();
