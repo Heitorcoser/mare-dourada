@@ -130,6 +130,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
 .tbtn{position:absolute;right:calc(22px + env(safe-area-inset-right,0px));width:74px;height:74px;border-radius:50%;border:2px solid rgba(251,246,236,.45);background:rgba(15,34,48,.5);color:var(--foam);font:700 13px var(--body);pointer-events:auto;touch-action:none}
 #tJump{bottom:calc(40px + env(safe-area-inset-bottom,0px))}
 #tAct{bottom:calc(130px + env(safe-area-inset-bottom,0px))}
+#tDuck{bottom:calc(220px + env(safe-area-inset-bottom,0px))}
 @media (max-width:640px){
   #score{gap:10px}.stat .v{font-size:19px}.stat{min-width:48px}
   #speed .v{font-size:22px}
@@ -170,7 +171,8 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
 
   <div id="help" class="hud panel" hidden>
     <h3>Comandos</h3>
-    <div><kbd>W A S D</kbd> andar · <kbd>Shift</kbd> correr</div>
+    <div><kbd>W A S D</kbd> andar · <kbd>Shift</kbd> correr · <kbd>Ctrl</kbd> ou <kbd>C</kbd> abaixar (segure)</div>
+    <div>Agachado no surfe: cabe em tubo menor, o lábio passa mais longe e a espuma derruba menos</div>
     <div><kbd>E</kbd> pegar ou largar a prancha</div>
     <div><kbd>Mouse</kbd> girar a câmera · <kbd>Roda</kbd> zoom</div>
     <div>No mar: <kbd>W</kbd> remar, <kbd>A</kbd>/<kbd>D</kbd> virar</div>
@@ -193,6 +195,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div id="stick"><div id="knob"></div></div>
     <button class="tbtn" id="tAct" type="button">Prancha</button>
     <button class="tbtn" id="tJump" type="button">Pular</button>
+    <button class="tbtn" id="tDuck" type="button">Abaixar</button>
   </div>
 
   <div id="boardSheet" class="sheet" hidden role="dialog" aria-labelledby="boardTitle">
@@ -272,6 +275,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
         <div><kbd>Espaço</kbd><span>furar a onda (duck dive)</span></div>
         <div><kbd>A / D</kbd><span>cavar na parede</span></div>
         <div><kbd>Mouse</kbd><span>olhar em volta</span></div>
+        <div><kbd>Ctrl</kbd><span>abaixar (segure)</span></div>
         <div><kbd>T</kbd><span>mudar a hora do dia</span></div>
       </div>
       <button id="go" type="button">Entrar na praia</button>
@@ -1368,7 +1372,9 @@ function makeChar(shortsCol = 0xff6f4f, shorts2Col = 0xffd166) {
 const BOARDS = {
   short: { name: 'Pranchinha', desc: 'curva fechada e manobras rápidas, para ondas normais', len: 1.0, wid: 1.0, paddle: 1.0, catchV: 2.6, turn: 1.0, vmax: 18, tol: 1.0, moveK: 1.0 },
   long:  { name: 'Long', desc: 'rema rápido e pega até marola; curva aberta; dá para andar no bico', len: 1.5, wid: 1.12, paddle: 1.3, catchV: 1.9, turn: 0.68, vmax: 15, tol: 1.25, moveK: 0.8 },
-  gun:   { name: 'Gun', desc: 'prancha de onda grande: rema forte, é estável e corre muito', len: 1.32, wid: 0.95, paddle: 1.38, catchV: 2.3, turn: 0.78, vmax: 23, tol: 1.4, moveK: 0.9 }
+  gun:   { name: 'Gun', desc: 'prancha de onda grande: rema forte, é estável e corre muito', len: 1.32, wid: 0.95, paddle: 1.38, catchV: 2.3, turn: 0.78, vmax: 23, tol: 1.4, moveK: 0.9 },
+  // bodyboard: você surfa deitado. Curta, larga e grossa; pega onda fácil, cabe em qualquer tubo (está colado na água)
+  body:  { name: 'Bodyboard', desc: 'surf deitado: pega onda fácil, cabe em tubo pequeno, faz rollo e 360', len: 0.56, wid: 1.32, thick: 1.9, paddle: 1.15, catchV: 2.0, turn: 1.3, vmax: 16, tol: 1.45, moveK: 1.0, prone: true }
 };
 // pinturas: liberadas pelos desafios (need = quantos desafios cumpridos)
 const PAINTS = [
@@ -1383,7 +1389,7 @@ const paintDef = k => PAINTS.find(p => p.k === k) || PAINTS[0];
 function applyBoardLook(g, type, paint) {
   const B = boardDef(type), P = paintDef(paint), mt = g.userData.mats; if (!mt) return;
   g.userData.look = type + '|' + paint;
-  g.scale.set(B.wid, 1, B.len);
+  g.scale.set(B.wid, B.thick || 1, B.len);
   mt.deck.color.set(P.deck); mt.stripe.color.set(P.stripe); mt.rail.color.set(P.rail);
 }
 const curBoard = () => boardDef(CFG.board);
@@ -1686,11 +1692,18 @@ const touchAxis = { x: 0, y: 0 };
 addEventListener('keydown', e => {
   if (e.target instanceof HTMLInputElement) return;   // digitando nome ou código da sala
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+  // Ctrl é "abaixar": bloqueia os atalhos do navegador com Ctrl + tecla do jogo (Ctrl+S salvar, Ctrl+D favorito...).
+  // Ctrl+W (fechar aba) o navegador não deixa bloquear: para isso existe o aviso de sair da página abaixo.
+  if ((e.ctrlKey || e.metaKey) && started && /^(Key[A-Z]|Digit\d|Space)$/.test(e.code)) e.preventDefault();
   if (!keys[e.code]) pressed[e.code] = true;
   keys[e.code] = true;
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+// segurando Ctrl e apertando W sem querer, o navegador fecharia a aba: com o jogo começado ele pergunta antes
+addEventListener('beforeunload', e => { if (started) { e.preventDefault(); e.returnValue = ''; } });
+// abaixar: Ctrl (qualquer lado) ou C
+const crouchKey = () => !!(keys.ControlLeft || keys.ControlRight || keys.KeyC);
 const axisX = () => clamp((keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + touchAxis.x, -1, 1);
 const axisY = () => clamp((keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) + touchAxis.y, -1, 1);
 const take = c => { const v = pressed[c]; pressed[c] = false; return v; };
@@ -1723,7 +1736,7 @@ if (isTouch) {
     knob.style.transform = `translate(${dx}px,${dy}px)`; touchAxis.x = dx / 45; touchAxis.y = -dy / 45;
   }
   const hold = (id, code) => { const b = document.getElementById(id); b.addEventListener('pointerdown', e => { e.preventDefault(); pressed[code] = true; keys[code] = true; }); const up = () => { keys[code] = false; }; b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); };
-  hold('tAct', 'KeyE'); hold('tJump', 'Space');
+  hold('tAct', 'KeyE'); hold('tJump', 'Space'); hold('tDuck', 'KeyC');
   let lid = null, lx = 0, ly = 0;
   canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch') return; lid = e.pointerId; lx = e.clientX; ly = e.clientY; });
   canvas.addEventListener('pointermove', e => { if (e.pointerId !== lid) return; camYaw -= (e.clientX - lx) * 0.006; camPitch = clamp(camPitch + (e.clientY - ly) * 0.004, -0.15, 1.2); lx = e.clientX; ly = e.clientY; lastLook = clock; });
@@ -1958,9 +1971,11 @@ function startRide() {
   S.mode = 'ride';
   rig.add(hero);
   S.popQ0 = hero.quaternion.clone(); S.popP0 = hero.position.clone();
+  S.proneRide = !!curBoard().prone;
   const sp = Math.max(6.5, Math.hypot(S.vx, S.vz) + 2.5);
   S.vx = Math.sin(S.heading) * sp; S.vz = Math.cos(S.heading) * sp;
   S.ride = newRide();
+  if (S.proneRide) { S.ride.time = 0.5; hero.quaternion.copy(Q_PRONE); hero.position.set(0, 0.15, -0.5); }   // deitado: sem levantar
   S.carveT = 0; S.lostT = 0; S.tubeT = 0; S.turn = null; S.pumpPh = 0; S.floatT = 0;
   if (late) award(S.ride, 'Drop atrasado!', 250);
   else pop('Dropou!');
@@ -2115,7 +2130,7 @@ function stepSkim(dt, ax, ay, jump, act, tgt) {
       const g = grad(S.pos.x, S.pos.z), climb = S.vx * g.gx + S.vz * g.gz;
       const elev = waterH(S.pos.x, S.pos.z) - Math.max(LEVEL * (1 - smooth(40, 120, S.pos.z)), terrainH(S.pos.x, S.pos.z));
       if (elev > 0.45 && climb > 0.5) {
-        S.mode = 'ride'; S.carveT = 0; S.lostT = 0; S.tubeT = 0; S.turn = null; S.pumpPh = 0; S.floatT = 0;
+        S.mode = 'ride'; S.carveT = 0; S.lostT = 0; S.tubeT = 0; S.turn = null; S.pumpPh = 0; S.floatT = 0; S.proneRide = false;
         S.popQ0 = hero.quaternion.clone(); S.popP0 = hero.position.clone();
         if (!S.ride) S.ride = newRide();
         S.ride.time = Math.max(S.ride.time, 0.6); S.ride.skim = false;
@@ -2129,7 +2144,7 @@ function stepSkim(dt, ax, ay, jump, act, tgt) {
     if (k.slowT > 0.3) { endSkim('skim'); if (!film && wet < 0.3) pop('Travou', 'a prancha parou na areia seca'); return; }
     if (dNow > 0.7) { endRide('lost'); S.speed = Math.min(sp * 0.5, 3); S.wx = S.wz = 0; enterPaddle(false); return; }
     // pose: agachado de lado, braços abertos para equilibrar
-    const crouch = 0.42 + Math.abs(ax) * 0.3;
+    const crouch = Math.min(1.2, 0.42 + Math.abs(ax) * 0.3 + 0.5 * (S.crouch || 0));
     tgt.hpLx = -crouch * 0.85; tgt.knL = crouch * 1.55; tgt.hpRx = -crouch * 0.85; tgt.knR = crouch * 1.55;
     tgt.hpLz = 0.32; tgt.hpRz = -0.32; tgt.spX = 0.2 + crouch * 0.25; tgt.spY = -ax * 0.35;
     tgt.hdY = 0.95; tgt.hdX = -0.1; tgt.shLz = 1.2 + ax * 0.3; tgt.shRz = -1.1 + ax * 0.3; tgt.elL = -0.3; tgt.elR = -0.4;
@@ -2153,7 +2168,8 @@ function stepSkim(dt, ax, ay, jump, act, tgt) {
     const gy = skimH(S.pos.x, S.pos.z) + 0.03;
     if (k.y <= gy && k.vy < 0) {
       const rem = angDiff(k.spin, 0), half = Math.round(Math.abs(k.spin) / Math.PI), deg = half * 180;
-      const clean = Math.abs(rem) < 0.7, reverse = Math.abs(Math.abs(rem) - Math.PI) < 0.7;
+      const tolL = 0.7 + 0.2 * (S.crouch || 0);                // aterrissar agachado perdoa mais
+      const clean = Math.abs(rem) < tolL, reverse = Math.abs(Math.abs(rem) - Math.PI) < tolL;
       if (clean || reverse) {
         // a prancha segue para onde ia; num giro de 180° o skim é simétrico e você só troca a base
         const vsp = Math.hypot(S.vx, S.vz) * 0.9, vA = Math.atan2(S.vx, S.vz);
@@ -2271,6 +2287,8 @@ function step(dt) {
   if (lastCrash > 0.6) shakeT = Math.max(shakeT, clamp(lastCrash - 0.6, 0, 1) * 0.3);
   const ax = axisX(), ay = axisY();
   const jump = take('Space'), act = take('KeyE');
+  S.crouch = lerp(S.crouch || 0, crouchKey() ? 1 : 0, 1 - Math.exp(-12 * dt));
+  const cr = S.crouch;
   let focus = new V3();
   const tgt = Object.assign({}, POSE);
   let poseK = 1 - Math.exp(-12 * dt);
@@ -2283,6 +2301,7 @@ function step(dt) {
     let spd = (keys.ShiftLeft || keys.ShiftRight) ? 7.8 : 4.3;
     if (depth > 0.15) spd *= clamp(1 - depth * 0.55, 0.35, 1);
     if (S.hasBoard) spd *= 0.85;
+    spd *= 1 - 0.55 * cr;                                     // agachado anda devagar
     const k = 1 - Math.exp(-10 * dt);
     S.vx = lerp(S.vx, mx * spd, k); S.vz = lerp(S.vz, mz * spd, k);
     let nx = clamp(S.pos.x + S.vx * dt, -150, 150), nz = clamp(S.pos.z + S.vz * dt, -95, 230);
@@ -2314,6 +2333,10 @@ function step(dt) {
     tgt.spX = 0.06 * a; tgt.spY = Math.sin(ph) * 0.08 * a;
     if (!S.grounded) { tgt.hpLx = -0.7; tgt.knL = 1.1; tgt.hpRx = -0.2; tgt.knR = 0.5; tgt.shLz = 0.6; tgt.shRz = -0.6; }
     if (S.hasBoard) { tgt.shRx = -0.15; tgt.shRz = -0.32; tgt.elR = -1.1; }
+    if (cr > 0.01 && S.grounded) {                           // agachado: dobra quadril e joelho, tronco para a frente
+      tgt.hpLx -= 0.95 * cr; tgt.hpRx -= 0.95 * cr; tgt.knL += 1.55 * cr; tgt.knR += 1.55 * cr;
+      tgt.spX += 0.6 * cr; tgt.hdX = -0.4 * cr; tgt.elL -= 0.4 * cr; tgt.elR -= 0.4 * cr;
+    }
     standHips(tgt);
     if (S.grounded) tgt.hipsY -= Math.abs(Math.sin(ph)) * 0.04 * a; else tgt.hipsY = 0.95;
     poseK = 1 - Math.exp(-18 * dt);
@@ -2335,7 +2358,7 @@ function step(dt) {
     setMode(depth > 0.15 ? 'Na água' : 'Na areia', '');
     if (LEVEL - TIDE < -0.2 && S.pos.z > -5) hud.wave.textContent = 'A água está recuando: vem série forte';
     else hud.wave.textContent = '';
-    focus.set(S.pos.x, S.y + 1.35, S.pos.z);
+    focus.set(S.pos.x, S.y + 1.35 - 0.45 * cr, S.pos.z);
     camFollow(dt, focus, null, 7.5);
     if (skimGo) startSkim();
   }
@@ -2511,7 +2534,8 @@ function step(dt) {
     // Long: segurando W o surfista caminha até o bico ("hang ten"); na parede, o peso no bico faz a prancha correr
     const nosing = CFG.board === 'long' && !popping && ay > 0 && sp > 4 && fFace > 0.2;
     S.noseK = lerp(S.noseK || 0, nosing ? 1 : 0, 1 - Math.exp(-2.5 * dt));
-    if (!popping && r.time >= POP + 0.1) hero.position.z = 0.05 + 0.62 * (S.noseK || 0);
+    if (S.proneRide) { hero.quaternion.copy(Q_PRONE); hero.position.set(0, 0.15, -0.5); }
+    else if (!popping && r.time >= POP + 0.1) hero.position.z = 0.05 + 0.62 * (S.noseK || 0);
     if (nosing && S.noseK > 0.5) { sp = Math.min(sp + 1.6 * dt, BR.vmax); S.vx = Math.sin(nAng) * sp; S.vz = Math.cos(nAng) * sp; }
     if (nosing && S.noseK > 0.8) { r.noseT += dt; if (r.noseT >= 2 && !r.hangTen) { r.hangTen = true; award(r, 'Hang ten', 350, 'no bico'); chDone('bico'); } } else if (!nosing) r.noseT = 0;
     if (!r.giant && !popping && r.beach === 'canhao' && (r.H || 0) >= 15 && r.time > 3) { r.giant = true; chDone('gigante'); }
@@ -2556,7 +2580,7 @@ function step(dt) {
     if (sp > 6) emit(S.pos.x - fx * 0.9, h + 0.1, S.pos.z - fz * 0.9, -fx * 1.5, 1.4, -fz * 1.5, 1.5, 0.5);
     // pose em pé (agacha nas curvas, sobe e desce bombeando)
     const pumpBob = ay > 0 ? Math.sin(S.pumpPh) * 0.16 : 0;
-    const crouch = 0.5 + Math.abs(ax) * 0.25 + pumpBob + (ay < 0 ? -0.15 : 0) + (S.tubeCam || 0) * 0.35;
+    const crouch = Math.min(1.25, 0.5 + Math.abs(ax) * 0.25 + pumpBob + (ay < 0 ? -0.15 : 0) + (S.tubeCam || 0) * 0.35);
     tgt.hpLx = -crouch * 0.85; tgt.knL = crouch * 1.55; tgt.hpRx = -crouch * 0.85; tgt.knR = crouch * 1.55;
     tgt.hpLz = 0.34; tgt.hpRz = -0.34;
     tgt.spX = 0.22 + crouch * 0.25; tgt.spY = -ax * 0.35; tgt.spZ = 0;
@@ -2564,7 +2588,25 @@ function step(dt) {
     tgt.shLz = 1.15 + ax * 0.3; tgt.shRz = -1.0 + ax * 0.3; tgt.shLx = -0.25; tgt.shRx = 0.2; tgt.elL = -0.35; tgt.elR = -0.5;
     if ((S.noseK || 0) > 0.3) { const k = S.noseK; tgt.shLz = lerp(tgt.shLz, 1.5, k); tgt.shRz = lerp(tgt.shRz, -1.5, k); tgt.hpLx *= 1 - 0.6 * k; tgt.knL *= 1 - 0.6 * k; tgt.hpRx *= 1 - 0.6 * k; tgt.knR *= 1 - 0.6 * k; tgt.spX *= 1 - 0.5 * k; }
     if (S.tubeCam > 0.3) { tgt.shRz = -0.3; tgt.shRx = 0.6; tgt.elR = -0.2; }   // mão na parede dentro do tubo
+    /* Ctrl: agachamento de tubo de verdade. Quadril quase no deck (~0,35 m), joelho de trás quase encostando na
+       prancha, tronco dobrado sobre as pernas, cabeça levantada olhando a saída, mão de trás arrastando na parede. */
+    if (cr > 0.01 && !S.proneRide) {
+      tgt.hpLx = lerp(tgt.hpLx, -1.75, cr); tgt.hpRx = lerp(tgt.hpRx, -1.5, cr);
+      tgt.knL = lerp(tgt.knL, 2.3, cr); tgt.knR = lerp(tgt.knR, 2.6, cr);
+      tgt.hpLz = lerp(tgt.hpLz, 0.48, cr); tgt.hpRz = lerp(tgt.hpRz, -0.22, cr);
+      tgt.spX = lerp(tgt.spX, 0.72, cr); tgt.hdX = lerp(tgt.hdX, -0.75, cr);
+      tgt.shLz = lerp(tgt.shLz, 0.75, cr); tgt.shLx = lerp(tgt.shLx, -0.9, cr); tgt.elL = lerp(tgt.elL, -0.9, cr);
+      tgt.shRz = lerp(tgt.shRz, -0.35, cr); tgt.shRx = lerp(tgt.shRx, 0.75, cr); tgt.elR = lerp(tgt.elR, -0.25, cr);
+    }
     standHips(tgt);
+    if (cr > 0.01 && !S.proneRide) tgt.hipsY = Math.max(0.33, tgt.hipsY);
+    if (S.proneRide) {
+      // deitado: mãos segurando o bico, cabeça levantada, pernas batendo pé de pato, corpo inclina na curva
+      const kick = Math.sin(clock * 9) * (ay > 0 ? 0.45 : 0.15);
+      Object.assign(tgt, { hipsY: 0.95, spX: -0.15, spY: 0, spZ: ax * 0.35, hdX: -0.85, hdY: 0,
+        shLx: -1.55, shRx: -1.55, shLz: 0.3, shRz: -0.3, elL: -0.7, elR: -0.7,
+        hpLx: 0.15 + kick, hpRx: 0.15 - kick, hpLz: 0.08, hpRz: -0.08, knL: 0.9 + kick * 0.6, knR: 0.9 - kick * 0.6 });
+    }
     if (popping) { tgt.hipsY = lerp(0.95, tgt.hipsY, r.time / POP); }
     poseK = popping ? 1 - Math.exp(-14 * dt) : 1 - Math.exp(-10 * dt);
     // aéreo: sair pela crista subindo rápido
@@ -2579,8 +2621,11 @@ function step(dt) {
        (colapso ≈ 0,35 s + 0,05 s por metro de onda depois do lábio tocar). Correndo mais que a abertura você sai. */
     const landFront = 1.25 * Hc * (0.75 + 0.25 * Math.min(hl, 1.5));
     const collapseT = ld + 0.35 + 0.05 * Hc;
-    const covered = hl >= 0.5 && Hc > 1.5 && a > ld * 0.25 && a < collapseT && front > 0.1 && front < landFront - 0.3;
-    const lipHit = hl >= 0.5 && Hc > 1.2 && a >= ld * 0.92 && a < ld + 0.3 && Math.abs(front - landFront) < 0.9;
+    // agachado você fica ~0,6 m mais baixo (deitado no bodyboard, mais ainda): cabe em tubo menor, entra mais fundo e
+    // o lábio precisa cair mais perto para te acertar
+    const low = S.proneRide ? 1.15 : cr;
+    const covered = hl >= 0.5 && Hc > 1.5 - 0.6 * low && a > ld * 0.25 && a < collapseT && front > 0.1 && front < landFront - 0.3 + 0.3 * low;
+    const lipHit = hl >= 0.5 && Hc > 1.2 && a >= ld * 0.92 && a < ld + 0.3 && Math.abs(front - landFront) < 0.9 - 0.35 * Math.min(low, 1);
     const closedOut = hl >= 0.5 && Hc > 1.2 && a >= collapseT && a < collapseT + 0.6 && front > 0.1 && front < landFront + 0.6;
     const crashed = lipHit || closedOut;
     const inPocket = hl >= 0.5 && a < collapseT + 0.1;                     // espuma de crista/lábio, não água branca
@@ -2589,24 +2634,25 @@ function step(dt) {
     if (covered) {
       S.tubeT += dt; r.maxTube = Math.max(r.maxTube || 0, S.tubeT);
       const deep = clamp(front / (Hc * 1.2), 0, 1);
-      r.pts += sp * dt * (10 + 10 * deep);
+      r.pts += sp * dt * (10 + 10 * deep) * (1 + 0.3 * cr);   // agachado lá no fundo vale mais
+      if (cr > 0.6 && !S.proneRide) S.tubeLow = true;
       shakeT = Math.max(shakeT, 0.18); if (Math.random() < dt * 3) dropsT = Math.max(dropsT, 0.7);
     } else if (S.tubeT > 0 && !crashed) {
-      if (S.tubeT > 0.5) { const b = Math.round(400 + S.tubeT * 450); award(r, S.tubeT > 2.5 ? 'Tubaço!' : 'Tubo!', b, S.tubeT.toFixed(1).replace('.', ',') + ' s lá dentro'); if (S.tubeT >= 2) chDone('tubo2'); }
-      S.tubeT = 0;
+      if (S.tubeT > 0.5) { const b = Math.round((400 + S.tubeT * 450) * (S.tubeLow ? 1.2 : 1)); award(r, (S.tubeT > 2.5 ? 'Tubaço!' : 'Tubo!') + (S.tubeLow ? ' agachado' : ''), b, S.tubeT.toFixed(1).replace('.', ',') + ' s lá dentro'); if (S.tubeT >= 2) chDone('tubo2'); }
+      S.tubeT = 0; S.tubeLow = false;
     }
     // fim da onda
     if (crashed) { const inTube = S.tubeT > 0.3; S.tubeT = 0; wipeout(closedOut ? (inTube ? 'o tubo fechou com você dentro · acelere (W) para sair antes' : 'a onda fechou em cima') : 'o lábio caiu bem na sua cabeça', closedOut ? 'close' : 'lip'); }
     else if (act && !popping) { endRide('kick'); S.speed = Math.min(sp * 0.4, 4); S.wx = S.wz = 0; enterPaddle(false); }
-    else if (depth < 0.55 && sp > 1.2) { toSkim(); pop('Skim', 'em pé, deslizando na areia'); }
+    else if (depth < 0.55 && sp > 1.2 && !S.proneRide) { toSkim(); pop('Skim', 'em pé, deslizando na areia'); }
     else if (depth < 0.55) { endRide('shore'); S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); }
-    else if (wfm > 0.85 && sp < 4.2 && !popping && !covered && !inPocket) wipeout('a espuma te engoliu', 'foam');
-    else if (!popping && !covered && Math.abs(diff) > 1.45 * BR.tol && sp < 4.5 && Math.abs(ax) > 0.5) wipeout('a rabeta soltou na curva', 'rail');
+    else if (wfm > 0.85 && sp < 4.2 - 1.2 * cr && !popping && !covered && !inPocket) wipeout('a espuma te engoliu', 'foam');
+    else if (!popping && !covered && Math.abs(diff) > 1.45 * BR.tol * (1 + 0.2 * cr) && sp < 4.5 && Math.abs(ax) > 0.5) wipeout('a rabeta soltou na curva', 'rail');
     else if ((g.gz < -0.02 && sp < 4.5) || (h < 0.35 && sp < 2.5)) { S.lostT += dt; if (S.lostT > 0.7) { endRide('lost'); S.speed = sp * 0.5; S.wx = S.wz = 0; enterPaddle(false); } }
     else S.lostT = 0;
     if (S.mode === 'ride') {
       if (popping) setHint('Levantando…');
-      else if (covered) setHint('<b>DENTRO DO TUBO!</b> <b>S</b> estola para ficar fundo · <b>W</b> acelera para sair');
+      else if (covered) setHint('<b>DENTRO DO TUBO!</b> <b>Ctrl</b> abaixa · <b>S</b> estola para ficar fundo · <b>W</b> acelera para sair');
       else if (closing) setHint('Vai fechar tudo! Aperte <b>E</b> para sair da onda');
       else if (sp > 8.5 && climb > 1.2) setHint('<b>ESPAÇO</b> agora para voar!');
       else if (fFace < 0.3 && sp > 6) setHint('Embaixo da onda: vire forte (<b>A/D</b>) para a cavada de base');
@@ -2614,7 +2660,7 @@ function step(dt) {
       else setHint((CFG.board === 'long' ? '<b>W</b> anda até o bico' : '<b>W</b> bombeia na descida') + ' · <b>A/D</b> manobras · <b>S</b> estola · <b>E</b> sai da onda');
       setMode(covered ? 'No tubo' : 'Surfando', 'ride');
     }
-    focus.set(rig.position.x, rig.position.y + 1.3, rig.position.z);
+    focus.set(rig.position.x, rig.position.y + (S.proneRide ? 0.75 : 1.3 - 0.6 * cr), rig.position.z);
     const camYawT = Math.atan2(S.vx * 0.6 + fx * 0.4, S.vz * 0.6 + fz * 0.4);
     camFollow(dt, focus, camYawT, 8.5);
   }
@@ -2641,7 +2687,7 @@ function step(dt) {
         S.mode = 'ride'; S.heading = S.heading + S.spin + (reverse ? 0 : 0);
         if (reverse) S.heading += Math.PI;
         const sp = Math.hypot(S.vx, S.vz) * 0.92; S.vx = Math.sin(S.heading) * sp; S.vz = Math.cos(S.heading) * sp;
-        const bonus = 350 + deg * 2.5; award(S.ride, deg >= 180 ? 'Aéreo ' + deg + '°' : 'Aéreo', bonus);
+        const bonus = 350 + deg * 2.5; award(S.ride, S.proneRide ? (deg >= 360 ? 'El rollo ' + deg + '°' : deg ? 'ARS ' + deg + '°' : 'Aéreo deitado') : deg >= 180 ? 'Aéreo ' + deg + '°' : 'Aéreo', bonus);
         if (deg >= 360) chDone('aereo360');
         emit(S.pos.x, h, S.pos.z, 0, 3, 0, 40, 1.8); splashSound(0.6);
       } else { S.heading += S.spin; wipeout('caiu de lado no aéreo', 'air'); }
@@ -2715,10 +2761,11 @@ function camBlocked(f, p) {
    deixavam a câmera de verdade para trás enquanto a onda subia (vários m/s na parede) e a água sumia, porque a
    superfície só tinha face de cima. Agora o piso vale para a posição final, olhando a água num raio de 0,9 m
    (o plano de corte da lente também não pode encostar) com 0,55 m de folga. */
-function keepCamAboveWater() {
-  const p = camera.position, r = 0.9;
+function keepCamAboveWater(tube = 0) {
+  // no tubo a câmera está colada na parede: olhar a água num raio grande a empurrava para cima, para dentro do lábio
+  const p = camera.position, r = lerp(0.9, 0.25, tube);
   const wmax = Math.max(waterH(p.x, p.z), waterH(p.x + r, p.z), waterH(p.x - r, p.z), waterH(p.x, p.z + r), waterH(p.x, p.z - r));
-  const floor = Math.max(terrainH(p.x, p.z) + 0.5, wmax + 0.55);
+  const floor = Math.max(terrainH(p.x, p.z) + 0.5, wmax + lerp(0.55, 0.3, tube));
   if (p.y < floor) p.y = floor;
 }
 function camFollow(dt, focus, autoYaw, dist) {
@@ -2737,11 +2784,16 @@ function camFollow(dt, focus, autoYaw, dist) {
     for (let dd = d * 0.8; dd > 1.6 && camBlocked(focus, want); dd *= 0.8) want = place(camYaw, dd);
     snap = 16;
   }
-  // dentro do tubo: câmera atrás do surfista, ao longo do eixo do tubo, olhando para a saída
+  /* Câmera de tubo: entra no tubo junto com você. Fica atrás, baixa, no mesmo ponto da parede (no eixo do tubo),
+     olhando para a saída. Não passa pela checagem de "algo tapando", porque dentro do tubo o lábio está SEMPRE em volta
+     (antes ela achava que estava tapado e ficava do lado de fora). */
   const tdx = Math.sign(S.vx) || 1;
   if (tube > 0.01 && S.mode === 'ride') {
-    const tc = new V3(focus.x - tdx * 3.4, focus.y - 0.25, focus.z - 0.35);
-    if (!camBlocked(focus, tc)) want.lerp(tc, tube);
+    const back = S.proneRide ? 2.2 : 2.6;
+    const tc = new V3(focus.x - tdx * back, focus.y - (S.proneRide ? 0.05 : 0.3), focus.z + 0.15);
+    const wtc = waterH(tc.x, tc.z); if (tc.y < wtc + 0.35) tc.y = wtc + 0.35;
+    want.lerp(tc, smooth(0, 1, tube));
+    snap = lerp(snap, 12, tube);
   }
   const floor = Math.max(terrainH(want.x, want.z) + 0.5, waterH(want.x, want.z) + 0.45);
   if (want.y < floor) want.y = floor;
@@ -2750,11 +2802,15 @@ function camFollow(dt, focus, autoYaw, dist) {
     const s = Math.min(shakeT, 1) * 0.35;
     camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; camera.position.z += (Math.random() - 0.5) * s;
   }
-  keepCamAboveWater();
-  if (tube > 0.01 && S.mode === 'ride') camera.lookAt(focus.x + tdx * 5 * tube, focus.y, focus.z - 0.3 * tube);
+  keepCamAboveWater(tube);
+  if (tube > 0.01 && S.mode === 'ride') {
+    // olha para a boca do tubo (à frente e um pouco para fora da parede) e inclina junto com a parede
+    camera.lookAt(focus.x + tdx * 7 * tube, focus.y - 0.15 * tube, focus.z - 0.9 * tube);
+    camera.rotateZ(-tdx * 0.16 * tube);
+  }
   else camera.lookAt(focus);
   const moving = S.mode === 'ride' || S.mode === 'air';
-  const fovT = 62 + (moving ? clamp(Math.hypot(S.vx, S.vz) * 0.6, 0, 13) : 0) + tube * 6;
+  const fovT = 62 + (moving ? clamp(Math.hypot(S.vx, S.vz) * 0.6, 0, 13) : 0) + tube * 16;   // tubo: lente bem aberta
   if (Math.abs(camera.fov - fovT) > 0.05) { camera.fov = lerp(camera.fov, fovT, 1 - Math.exp(-3 * dt)); camera.updateProjectionMatrix(); }
 }
 
