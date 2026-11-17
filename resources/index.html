@@ -344,7 +344,7 @@ const WTYPES = {
   fechadeira: { name: 'Fechadeira', desc: 'fecha tudo de uma vez',     mode: 1, dir: 0,  vp: 99,  hollow: 0.9, zOff: -6,  size: 1.0 },
   cheia:      { name: 'Cheia',      desc: 'quebra mole, sem tubo',     mode: 0, dir: 0,  vp: 6.0, hollow: 0.0, zOff: 18,  size: 0.9 },
   laje:       { name: 'Laje',       desc: 'tubo grosso e muito rápido', mode: 2, dir: 0, vp: 11,  hollow: 1.5, zOff: -14, size: 1.2 },
-  beira:      { name: 'Beira',      desc: 'onda média que quebra na areia', mode: 1, dir: 0, vp: 99, hollow: 1.1, zAbs: 17, size: 0.55, shoreW: 3.5 },
+  beira:      { name: 'Beira',      desc: 'onda que quebra na areia', mode: 1, dir: 0, vp: 99, hollow: 1.1, zAbs: 24, size: 0.4, shoreW: 3.5, maxH: 1.25 },
   /* Tipos novos, pela física de quebra (número de Iribarren ξ = tanβ/√(H/L0): derrama < 0,5 < mergulha < 3,3 < sobe a praia)
      e pela forma do fundo:
      - Ponta (point break): a ondulação contorna um promontório e abre devagar e comprida, sempre do mesmo lado.
@@ -356,7 +356,7 @@ const WTYPES = {
   dupla:      { name: 'Dupla',      desc: 'duas ondas somadas: grossa e oca', mode: 0, dir: 0, vp: 10, hollow: 1.35, zOff: -10, size: 1.4, peak: 0.45, pw: 30, weight: 0.6 },
   cunha:      { name: 'Cunha',      desc: 'pico alto e estreito colado no molhe', mode: 0, dir: 0, vp: 6.0, hollow: 1.25, zOff: -16, size: 1.15, peak: 1.0, pw: 16, x0Abs: 122, weight: 0.7 },
   fora:       { name: 'De fora',    desc: 'a bomba rara que quebra lá fora', mode: 0, dir: 0, vp: 9.0, hollow: 1.0, zOff: 38, size: 1.75, weight: 0.35 },
-  surgente:   { name: 'Surgente',   desc: 'sobe a areia sem quebrar', mode: 1, dir: 0, vp: 99, hollow: 0.0, zAbs: 13, size: 0.6, shoreW: 3.0, swash: 1.7, weight: 0.7 },
+  surgente:   { name: 'Surgente',   desc: 'sobe a areia sem quebrar', mode: 1, dir: 0, vp: 99, hollow: 0.0, zAbs: 13, size: 0.6, shoreW: 3.0, swash: 1.7, weight: 0.7, maxH: 1.0 },
   /* - Tubo rápido: a bancada é reta e rasa, a onda abre de lado muito depressa (ângulo de abertura pequeno).
        O tubo corre na sua frente: só sai quem bombeia e acelera.
      - Pipeline: bancada de coral rasa e em degrau. A onda chega de água funda e "tropeça" na laje: o lábio é jogado
@@ -474,6 +474,9 @@ function waveParams(n) {
   mult *= 0.82 + 0.45 * st;
   const lull = !set && !ty.zAbs && hash1(n + 41.3) < 0.36 - 0.31 * st;
   if (lull) mult *= 0.62;
+  // onda que quebra colada na areia não pode ser maior que a profundidade deixa (~1 m de onda em 0,7 m d'água):
+  // antes a Beira e a Surgente chegavam com 2 a 3,6 m a 6 m da areia, onde a água tem ~30 cm
+  if (ty.maxH) mult = Math.min(mult, ty.maxH / 3.7);
   const H0 = 3.7 * mult, zB = ty.zAbs ? ty.zAbs : clamp(80 + 24 * mult + ty.zOff + B.zAdd, 60, B.zMax);
   /* Largura: toda onda cobre praticamente a praia inteira (~720 m), para dar tempo de surfar. Só sobra uma faixa
      de mar liso no fim (60 a 90 m) para sair da onda quando ela acaba. */
