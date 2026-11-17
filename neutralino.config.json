@@ -1,10 +1,10 @@
 {
   "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
   "applicationId": "io.github.maredourada",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "defaultMode": "window",
   "documentRoot": "/resources/",
-  "url": "/",
+  "url": "/?app=exe",
   "enableServer": true,
   "enableNativeAPI": false,
   "tokenSecurity": "one-time",

@@ -1,0 +1,95 @@
+name: Release (APK Android e EXE Windows)
+
+# Cria uma tag "v1.2.3" e envie (git push origin v1.2.3): o GitHub monta o APK e o EXE e publica a release.
+# Os apps abrem o site do GitHub Pages quando há internet, então o JOGO se atualiza sozinho sem nova release;
+# a release só é necessária quando o próprio app (a "casca") muda.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Versão
+        run: |
+          V="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = tag ] || V=0.0.0-dev
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$V\"/" neutralino.config.json
+          grep '"version"' neutralino.config.json
+      - name: Monta o EXE (Neutralinojs)
+        run: |
+          npx -y @neutralinojs/neu@11.8.0 update
+          npx -y @neutralinojs/neu@11.8.0 build --embed-resources
+          ls -la dist/mare-dourada
+          cp dist/mare-dourada/*win_x64.exe MareDourada-win64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exe
+          path: MareDourada-win64.exe
+
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Copia o jogo para dentro do APK (para jogar sem internet)
+        run: |
+          mkdir -p android/app/src/main/assets/www
+          cp -r resources/* android/app/src/main/assets/www/
+      - name: Chave privada (opcional, segredo ANDROID_KEYSTORE_B64)
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          fi
+      - name: Monta o APK
+        env:
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          V="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = tag ] || V=0.0.0-dev
+          export VERSION_NAME="$V"
+          gradle -p android assembleRelease --no-daemon --stacktrace
+          cp android/app/build/outputs/apk/release/app-release.apk MareDourada.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: MareDourada.apk
+
+  release:
+    needs: [exe, apk]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Maré Dourada ${{ github.ref_name }}
+          files: |
+            MareDourada.apk
+            MareDourada-win64.exe
+          body: |
+            **Android:** baixe `MareDourada.apk` no celular e abra (pode ser preciso permitir "instalar apps desconhecidos").
+            **Windows:** baixe `MareDourada-win64.exe` e dê dois cliques (se aparecer "O Windows protegeu o computador", clique em *Mais informações → Executar assim mesmo*).
+
+            Os dois se atualizam sozinhos: com internet eles abrem a versão mais nova do jogo direto do site. Sem internet, abrem a cópia que vem dentro do app. Quando sair um app novo, o jogo avisa com um link.
+
+            Jogar no navegador: https://heitorcoser.github.io/mare-dourada/

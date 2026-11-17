@@ -555,6 +555,10 @@ function waveAt(x, z, out = _wo) {
     let lat = 0.85 + 0.15 * Math.sin(x * 0.03 + w.ph2);
     if (w.peak) { const q = (x - w.x0) / w.pw; lat *= lerp(1, 0.45 + 0.75 * Math.exp(-q * q), w.peak); }   // energia concentrada num pico
     let A = amp * w.mult * lat;
+    /* Deformação antes de quebrar: nos últimos segundos a crista sobe (peaking, ~16%), fica irregular ao longo da
+       onda (seções que empinam antes das outras) e se inclina para a frente, até o lábio sair. Depois tudo volta. */
+    const dfm = pre * (1 - smooth(0, w.land * 0.7, a)) * hc;
+    A *= 1 + 0.16 * dfm + 0.07 * pre * (1 - post) * Math.sin(x * 0.11 + w.ph2 * 3);
     // limite de profundidade perto da praia (só antes de quebrar; depois o capK abaixo cuida da água branca)
     if (w.shoreW >= 5) { const dl = 1 - smooth(45, 85, w.zc); if (dl > 0) A = lerp(A, smin(A, depthCap(w.zc, x), 0.4), dl * (1 - post)); }
     // depois de quebrar, a água branca é limitada pela profundidade (~metade do fundo): a espuma de uma onda gigante
@@ -566,8 +570,10 @@ function waveAt(x, z, out = _wo) {
     let wf = lerp(9, 3.4, Math.max(shoal * 0.55, pre)) * kE;
     wf = lerp(wf, Math.max(0.9, 0.32 * A / (0.6 + 0.4 * hl)), smooth(0, w.land * 0.6, a) * (1 - post) * hc);   // parede quase vertical sob o lábio
     wf = lerp(wf, 6.5 * kE, post);
-    const d = z - w.zc; const ww = d < 0 ? wf : 14 * kB;
-    h += A * Math.exp(-(d * d) / (ww * ww));
+    const d = z - w.zc;
+    const dS = d + 0.18 * A * dfm;                              // crista inclinada para a frente (para a praia)
+    const ww = dS < 0 ? wf : 14 * kB;
+    h += A * Math.exp(-(dS * dS) / (ww * ww));
     // explosão: a água sobe onde o lábio cai
     // água branca onde o lábio cai: uma elevação baixa, larga e coberta de espuma (o salto da água é feito
     // pelas partículas). Antes era um morro sólido de 0,42·A, estreito, que virava uma "tenda" na faixa do impacto.
@@ -657,6 +663,8 @@ void waveAt(vec2 p, out float h, out float foam){
     float lat=0.85+0.15*sin(x*0.03+w.z);
     if(dd.x>0.0){ float q=(x-b.x)/dd.y; lat*=mix(1.0,0.45+0.75*exp(-q*q),dd.x); }
     float A=amp*w.y*lat;
+    float dfm=pre*(1.0-smoothstep(0.0,w.w*0.7,a))*hc;
+    A*=1.0+0.16*dfm+0.07*pre*(1.0-post)*sin(x*0.11+w.z*3.0);
     if(c.w>=5.0){ float dl=1.0-smoothstep(45.0,85.0,w.x); if(dl>0.0){ float cap=1.0*max(0.3,-terrainH(vec2(x,w.x))+uLevel)+0.5;
       float hh=clamp(0.5+0.5*(cap-A)/0.4,0.0,1.0); float sm=mix(cap,A,hh)-0.4*hh*(1.0-hh); A=mix(A,sm,dl*(1.0-post)); } }
     float capK=smoothstep(w.w*0.9,w.w+(2.5+1.5*(kF-1.0))*(1.0-0.7*sF),a);
@@ -665,8 +673,8 @@ void waveAt(vec2 p, out float h, out float foam){
     float wf=mix(9.0,3.4,max(shoal*0.55,pre))*kE;
     wf=mix(wf,max(0.9,0.32*A/(0.6+0.4*hl)),smoothstep(0.0,w.w*0.6,a)*(1.0-post)*hc);
     wf=mix(wf,6.5*kE,post);
-    float d=z-w.x; float ww = d<0.0 ? wf : 14.0*kB;
-    h+=A*exp(-(d*d)/(ww*ww));
+    float d=z-w.x; float dS=d+0.18*A*dfm; float ww = dS<0.0 ? wf : 14.0*kB;
+    h+=A*exp(-(dS*dS)/(ww*ww));
     float imp=smoothstep(w.w*0.85,w.w+0.4,a)*(1.0-smoothstep(w.w+0.4,w.w+2.2,a))*hc;
     float impF=0.0;
     if(imp>0.001){ float du=d+1.25*A*(0.75+0.25*hl); float s=0.55*A+1.6; impF=imp*exp(-(du*du)/(s*s)); h+=A*0.14*impF; }
@@ -845,15 +853,15 @@ function makeWaterMat(far) {
         float solid=smoothstep(0.7,1.05,fA);
         float laceF=smoothstep(0.08,0.55,fA)*max(web,web2*0.7);
         float foam=max(solid,laceF)*(0.85+0.15*web2);
-        float shore=smoothstep(0.6,0.05,depth)*smoothstep(0.35,0.75,fbm(q*0.6-vec2(0.0,uTime*0.25))+0.15);
-        float lace=web*smoothstep(1.4,0.2,depth)*0.45;
+        float shore=0.7*smoothstep(0.5,0.05,depth)*smoothstep(0.4,0.78,fbm(q*0.6-vec2(0.0,uTime*0.25))+0.12);
+        float lace=web*smoothstep(0.7,0.1,depth)*0.22*smoothstep(0.35,0.62,fn);   // renda só em manchas, bem perto da areia
         // carneirinhos com vento maral lá fora
         float caps=smoothstep(0.78,0.9,fbm(q*0.18+vec2(uTime*0.05,uTime*0.12)))*max(0.0,-uEnv.x)*smoothstep(25.0,70.0,q.y)*(0.45+0.55*web2);
         float swUp, swK; float zf=swashFrontAny(q.x,q.y,swUp,swK);
         float onSand=step(zf,1e2)*smoothstep(SHORE+3.0,SHORE-1.0,q.y);
         float fq=(q.y-zf)/(0.55+0.4*fn); float front=exp(-fq*fq)*swUp;
         float bubbles=smoothstep(0.62,0.7,fbm(q*3.5+vec2(0.0,uTime*0.6)))*smoothstep(4.0,0.0,q.y-zf)*swUp;
-        float hatch=(1.0-swUp)*onSand*smoothstep(0.9,0.97,max(abs(sin((q.x*0.9+q.y*1.6)*1.3)),abs(sin((q.x*0.9-q.y*1.6)*1.3))))*smoothstep(0.0,3.0,q.y-zf)*0.45;
+        float hatch=0.0;   // a grade de linhas cruzadas na água rasa parecia defeito: removida
         float fm=clamp(foam+shore+lace+caps+front*0.95+bubbles*0.7+hatch,0.0,1.0);
         // chuva: anéis de gota na água
         if(uEnv.w>0.01 && near>0.0){
@@ -3563,6 +3571,42 @@ function mpRender() {
   }
   if (MP.status) el('p', 'mpstatus', MP.status);
 }
+
+/* ---------- Apps (Windows .exe e Android .apk): atualização automática ----------
+   Os apps trazem uma cópia do jogo para jogar sem internet. Com internet, eles abrem o site do GitHub Pages, que
+   sempre tem a última versão: você recebe as novidades sem baixar nada. Se sair um app novo (APK/EXE), aparece
+   um aviso com o link da release. O app Android já abre o site direto; o .exe abre a cópia local com ?app=exe e
+   este código pula para o site quando ele responde (sem internet, continua na cópia local). */
+const GAME_VERSION = '1.1.0';
+const APP_SITE = 'https://heitorcoser.github.io/mare-dourada/';
+(function appShell() {
+  const qs = new URLSearchParams(location.search);
+  const app = qs.get('app'), onSite = location.hostname === 'heitorcoser.github.io';
+  if (app === 'exe' && !onSite && navigator.onLine) {
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    if (ctl) setTimeout(() => ctl.abort(), 3500);
+    fetch(APP_SITE + 'version.json?t=' + Date.now(), { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { if (j && j.version) location.replace(APP_SITE + '?app=exe&shell=' + encodeURIComponent(qs.get('shell') || GAME_VERSION)); })
+      .catch(() => { });
+    return;
+  }
+  const shell = qs.get('shell');
+  if (!app || !shell) return;
+  const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+  fetch('https://api.github.com/repos/Heitorcoser/mare-dourada/releases/latest').then(r => r.json()).then(j => {
+    const tag = String(j.tag_name || '').replace(/^v/, '');
+    if (!tag || !newer(tag, shell)) return;
+    const file = app === 'apk' ? 'MareDourada.apk' : 'MareDourada-win64.exe';
+    const a = (j.assets || []).find(x => x.name === file);
+    const box = document.createElement('a');
+    box.href = a ? a.browser_download_url : j.html_url; box.target = '_blank'; box.rel = 'noopener';
+    box.textContent = 'App novo (v' + tag + ') disponível · toque para baixar';
+    box.style.cssText = 'position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:50;' +
+      'padding:9px 16px;border-radius:999px;background:#2fd0bc;color:#0f2230;font:700 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 6px 20px rgba(0,0,0,.35)';
+    document.body.appendChild(box); setTimeout(() => box.remove(), 15000);
+  }).catch(() => { });
+})();
 
 netConnect();
 requestAnimationFrame(frame);

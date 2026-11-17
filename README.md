@@ -6,13 +6,18 @@ Jogo de surf em 3D numa baía ao pôr do sol. Ande pela praia, pegue a prancha, 
 
 **[heitorcoser.github.io/mare-dourada](https://heitorcoser.github.io/mare-dourada/)** — funciona no PC e no celular.
 
-## Baixar e jogar (Windows)
+## Baixar o app (Android e Windows)
 
-1. Vá em **[Releases](../../releases/latest)** e baixe `MareDourada-win64.exe`.
-2. Dê dois cliques. Não precisa instalar nem de internet.
-3. Se o Windows mostrar "O Windows protegeu o computador", clique em **Mais informações → Executar assim mesmo** (o arquivo não é assinado digitalmente).
+Em **[Releases](../../releases/latest)**:
 
-Precisa do Microsoft Edge WebView2, que já vem no Windows 10 e 11.
+- **Android:** baixe `MareDourada.apk` no celular e abra. Se pedir, permita "instalar apps desconhecidos" para o navegador.
+- **Windows:** baixe `MareDourada-win64.exe` e dê dois cliques. Se aparecer "O Windows protegeu o computador", clique em **Mais informações → Executar assim mesmo** (o arquivo não é assinado digitalmente). Precisa do Microsoft Edge WebView2, que já vem no Windows 10 e 11.
+
+**Atualização automática:** com internet, os apps abrem a versão mais nova do jogo direto deste site, então toda novidade chega sozinha, sem baixar nada. Sem internet, eles abrem a cópia do jogo que vem dentro do app. Quando sair um app novo, o jogo mostra um aviso com o link para baixar.
+
+### Publicar uma versão nova dos apps
+
+Crie e envie uma tag (`git tag v1.2.0 && git push origin v1.2.0`). O workflow `release.yml` monta o APK (Gradle) e o EXE (Neutralinojs) no GitHub e publica a release. O APK é assinado com a chave de debug fixa em `android/debug.keystore`, para cada APK novo instalar por cima do anterior; para usar uma chave privada, crie os segredos `ANDROID_KEYSTORE_B64` (o .jks em base64) e `ANDROID_KEYSTORE_PASS` no repositório.
 
 ## Multiplayer
 
