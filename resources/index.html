@@ -2032,8 +2032,8 @@ function skimRig() {
 function startSkim() {
   const run = Math.hypot(S.vx, S.vz);
   S.mode = 'skim';
-  S.heading = Math.atan2(S.vx, S.vz);
-  const sp = Math.min(run * 1.3 + 2.5, 13.5);                   // impulso: a corrida + o pulo em cima da prancha
+  S.heading = run > 0.5 ? Math.atan2(S.vx, S.vz) : S.facing;
+  const sp = Math.min(run * 1.3 + 3, 13.5);                     // impulso: a corrida + o pulo em cima da prancha
   S.vx = Math.sin(S.heading) * sp; S.vz = Math.cos(S.heading) * sp;
   skimRig();
   rig.position.set(S.pos.x, skimH(S.pos.x, S.pos.z) + 0.03, S.pos.z);
@@ -2296,9 +2296,8 @@ function step(dt) {
     const wetHere = depth > 0.004 ? 1 : sandWet(S.pos.x, S.pos.z);
     let skimGo = false;
     if (jump && S.grounded && S.hasBoard && depth < 0.35 && S.pos.z < SHORE + 8) {
-      if (wetHere > 0.45 && sp > 2.2) skimGo = true;
-      else if (wetHere <= 0.45) pop('Areia seca', 'o skim só desliza na areia molhada');
-      else pop('Mais rápido', 'corra (Shift) antes de jogar a prancha');
+      if (wetHere > 0.25) skimGo = true;                      // parado também vale (empurrão menor); correndo dá mais impulso
+      else pop('Areia seca', 'o skim só desliza na areia molhada, perto da água');
     }
     if (jump && S.grounded && !skimGo) { S.vy = 5.2; S.grounded = false; }
     S.vy -= 16 * dt; S.y += S.vy * dt;
@@ -2326,7 +2325,7 @@ function step(dt) {
       if (d < 2.4) { setHint('<b>E</b> pegar a prancha'); if (act) { S.hasBoard = true; enterWalk(); pop('Prancha na mão'); } }
       else setHint(depth > 0.6 ? 'Sem prancha não dá pra passar da arrebentação. Volte e pegue a prancha.' : 'Sua prancha está na areia, marcada pela seta amarela');
     } else {
-      setHint(wetHere > 0.45 && depth < 0.35 ? 'Areia molhada: corra (<b>Shift</b>) e aperte <b>ESPAÇO</b> para o skim · ou entre no mar para remar'
+      setHint(wetHere > 0.25 && depth < 0.35 ? 'Areia molhada: corra (<b>Shift</b>) e aperte <b>ESPAÇO</b> para o skim · ou entre no mar para remar'
         : depth > 0.1 ? 'Continue entrando no mar para começar a remar' : 'Leve a prancha até o mar · <b>E</b> larga na areia');
       if (act && depth < 0.1) { S.hasBoard = false; boardToSand(S.pos.x + Math.cos(S.facing) * 1.2, S.pos.z - Math.sin(S.facing) * 1.2, S.facing); enterWalk(); }
       // só deita na prancha quando VOCÊ entra no mar (andando para o fundo) ou onde não dá mais pé. Antes bastava a água
@@ -2599,7 +2598,7 @@ function step(dt) {
     // fim da onda
     if (crashed) { const inTube = S.tubeT > 0.3; S.tubeT = 0; wipeout(closedOut ? (inTube ? 'o tubo fechou com você dentro · acelere (W) para sair antes' : 'a onda fechou em cima') : 'o lábio caiu bem na sua cabeça', closedOut ? 'close' : 'lip'); }
     else if (act && !popping) { endRide('kick'); S.speed = Math.min(sp * 0.4, 4); S.wx = S.wz = 0; enterPaddle(false); }
-    else if (depth < 0.55 && sp > 3.2) { toSkim(); pop('Skim', 'deslizando até a areia'); }
+    else if (depth < 0.55 && sp > 1.2) { toSkim(); pop('Skim', 'em pé, deslizando na areia'); }
     else if (depth < 0.55) { endRide('shore'); S.facing = S.heading; S.y = terrainH(S.pos.x, S.pos.z); enterWalk(); }
     else if (wfm > 0.85 && sp < 4.2 && !popping && !covered && !inPocket) wipeout('a espuma te engoliu', 'foam');
     else if (!popping && !covered && Math.abs(diff) > 1.45 * BR.tol && sp < 4.5 && Math.abs(ax) > 0.5) wipeout('a rabeta soltou na curva', 'rail');
