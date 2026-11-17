@@ -52,6 +52,7 @@ canvas#c{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
 #menu[hidden]{display:none}
 #menu button{font:600 13px var(--body);letter-spacing:.04em;text-align:left;color:var(--foam);background:transparent;border:0;border-radius:9px;padding:8px 11px;cursor:pointer}
 #menu button:hover,#menu button:focus-visible{background:rgba(251,246,236,.1);outline:none}
+#menu .ver{margin-top:4px;padding:7px 11px 3px;border-top:1px solid rgba(251,246,236,.15);font:600 11px var(--body);letter-spacing:.04em;color:var(--sand);opacity:.85}
 #hint{bottom:calc(22px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);font-size:16px;font-weight:600;text-align:center;max-width:min(92vw,620px);text-shadow:0 1px 6px rgba(0,0,0,.45)}
 #hint b{font-family:var(--display);font-weight:400;color:#ffd166;letter-spacing:.04em}
 #wave{bottom:calc(96px + env(safe-area-inset-bottom,0px));white-space:nowrap;left:50%;transform:translateX(-50%);font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--sand);font-weight:700;text-shadow:0 1px 6px rgba(0,0,0,.5)}
@@ -176,6 +177,7 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
       <button id="bHelp" type="button" role="menuitem">Ajuda (H)</button>
       <button id="bSet" type="button" role="menuitem">Ajustes (O)</button>
       <button id="bMp" type="button" role="menuitem" hidden>Multiplayer (P)</button>
+      <div id="verInfo" class="ver" aria-live="polite"></div>
     </div>
   </div>
 
@@ -561,7 +563,7 @@ function updateWaves() {
     w.foamK = wp.rf ? smooth(wp.rp.zR, wp.rp.zR + 15, w.zc) : 1;   // a espuma se desfaz antes de renascer
     // vários picos: o trecho de cada pico abre inteiro em ~9 s, antes da onda chegar na areia
     w.seed = hash1(n + 91.3) * TAU; w.bk = ty.mode === 2 ? 0.35 : 1;
-    w.S = ty.zAbs || ty.mode === 1 ? 0 : (ty.mode === 2 ? w.vp * (ty.x0Abs ? 14 : 9) : 2 * w.vp * 8) * (0.85 + 0.3 * hash1(n + 92.7));
+    w.S = 0;   // um pico só por onda (a quebra em vários pedaços foi tirada)
     w.grow = 1; w.reform = false;
     let landK = ty.landK || 1, zAbs = ty.zAbs;
     // renasceu: daqui para a frente é outra onda (menor), que levanta do mar liso e quebra perto da areia
@@ -570,7 +572,7 @@ function updateWaves() {
       w.mult = r.mult2; w.height = 3.7 * r.mult2; w.mode = r.vp2 > 50 ? 1 : 0; w.vp = r.vp2; w.dir = 0; w.close = w.mode === 1 ? 1 : 0;
       w.hollow = r.hollow2; w.peak = 0; w.shB = 0; w.kF = 1; w.zBreak = r.zB2; w.shoreW = 14; landK = 1;
       w.x0 = clamp(w.x0 + r.dx2 * 120, -BH + 80, BH - 80); w.hw = r.hw2;
-      w.S = w.mode === 0 ? 2 * w.vp * 6 : 0; w.bk = 1;
+      w.S = 0; w.bk = 1;
       w.dkW = 1; w.foamK = 1; w.grow = smooth(r.zR, r.zR - 10, w.zc);   // sai da altura da água branca para a da onda nova
     }
     // queda livre do lábio (onda gigante cai por mais tempo). Perto da praia a onda que ainda não quebrou já perdeu
@@ -623,7 +625,12 @@ function depthCap(zc, x = 0) { return 1.0 * Math.max(0.3, -terrainH(x, zc) + LEV
 function smin(a, b, k) { const h = clamp(0.5 + 0.5 * (b - a) / k, 0, 1); return lerp(b, a, h) - k * h * (1 - h); }
 // lado "morto" de uma direita/esquerda: a transição para a parte oca dura 10 m (antes era um degrau no pico,
 // e a altura da parede mudava de uma coluna da malha para a outra)
-function hollowAt(w, x) { return w.mode === 2 && !(w.S > 0) ? w.hollow * smooth(-10, 0, (x - w.x0) * w.dir) : w.hollow; }
+function hollowAt(w, x) {
+  const hl = w.mode === 2 && !(w.S > 0) ? w.hollow * smooth(-10, 0, (x - w.x0) * w.dir) : w.hollow;
+  // o ombro que só vai quebrar 25 a 55 m mais perto da areia que o pico quebra derramando (sem tubo), como numa praia
+  const zBp = w.zc + C * w.e, zBx = zBp - C * spreadAt(w, x);
+  return hl * smooth(zBp - 55, zBp - 25, zBx);
+}
 const _wo = { h: 0, foam: 0 };
 function waveAt(x, z, out = _wo) {
   let h = 0, foam = 0;
@@ -651,7 +658,7 @@ function waveAt(x, z, out = _wo) {
        a onda inteira a ~1,5 m/s, entre 35 e 55 m da areia, sem ela ter quebrado). */
     const zBx = Math.max(w.zc + C * (w.e - spreadAt(w, x)), 24), zBp = w.zc + C * w.e;
     // (suavizado para o jogo: o ombro fica com 50% a 100% do pico, para a onda render por quase toda a praia)
-    A *= clamp(Math.pow((0.85 * (zBx - SHORE) * BETA + 0.35) / (0.85 * Math.max(zBp - SHORE, 1) * BETA + 0.35), 0.35), 0.5, 1);
+    A *= clamp(Math.pow((0.85 * (zBx - SHORE) * BETA + 0.35) / (0.85 * Math.max(zBp - SHORE, 1) * BETA + 0.35), 0.6), 0.3, 1);
     /* Deformação antes de quebrar: nos últimos segundos a crista sobe (peaking, ~16%), fica irregular ao longo da
        onda (seções que empinam antes das outras) e se inclina para a frente, até o lábio sair. Depois tudo volta. */
     const dfm = pre * (1 - smooth(0, w.land * 0.7, a)) * hc;
@@ -763,6 +770,7 @@ void waveAt(vec2 p, out float h, out float foam){
     else { spread=abs(dx)/c.x; }
     float a=max(b.y-spread, b.w+0.3*sin(x*0.045+w.z*1.7));
     float hl = (b.z>1.5 && gg.y<=0.0) ? c.z*smoothstep(-10.0,0.0,dx*c.y) : c.z;
+    { float zBpH=w.x+7.5*b.y; hl*=smoothstep(zBpH-55.0,zBpH-25.0,zBpH-7.5*spread); }
     float hc=min(hl,1.0);
     float appr=clamp((Z0-z)/50.0,0.0,1.0);
     float shoal=clamp((250.0-z)/150.0+dd.z,0.0,1.0);
@@ -776,7 +784,7 @@ void waveAt(vec2 p, out float h, out float foam){
     if(dd.x>0.0){ float q=(x-b.x)/dd.y; lat*=mix(1.0,0.45+0.75*exp(-q*q),dd.x); }
     float A=amp*w.y*lat;
     float zBx=max(w.x+7.5*(b.y-spread),24.0), zBp=w.x+7.5*b.y;
-    A*=clamp(pow((0.85*(zBx-SHORE)*0.055+0.35)/(0.85*max(zBp-SHORE,1.0)*0.055+0.35),0.35),0.5,1.0);
+    A*=clamp(pow((0.85*(zBx-SHORE)*0.055+0.35)/(0.85*max(zBp-SHORE,1.0)*0.055+0.35),0.6),0.3,1.0);
     float dfm=pre*(1.0-smoothstep(0.0,w.w*0.7,a))*hc;
     A*=1.0+0.16*dfm+0.07*pre*(1.0-post)*sin(x*0.11+w.z*3.0);
     vec4 ee=uE[i];
@@ -3697,38 +3705,55 @@ function mpRender() {
 }
 
 /* ---------- Apps (Windows .exe e Android .apk): atualização automática ----------
-   Os apps trazem uma cópia do jogo para jogar sem internet. Com internet, eles abrem o site do GitHub Pages, que
-   sempre tem a última versão: você recebe as novidades sem baixar nada. Se sair um app novo (APK/EXE), aparece
-   um aviso com o link da release. O app Android já abre o site direto; o .exe abre a cópia local com ?app=exe e
-   este código pula para o site quando ele responde (sem internet, continua na cópia local). */
-const GAME_VERSION = '1.1.0';
+   Os apps trazem uma cópia do jogo para jogar sem internet. Com internet, abrem o site do GitHub Pages, que sempre
+   tem a última versão: você recebe as novidades sem baixar nada.
+   - O app Android abre o site direto (e cai na cópia local se não tiver internet).
+   - O .exe abre a cópia local; ela tem um arquivo app.json (que o site não tem), e é por ele que o jogo sabe que
+     está dentro do app e pula para o site quando ele responde. Antes isso dependia de "?app=exe" na URL, que o
+     .exe podia perder: aí ele ficava para sempre na cópia velha.
+   - O endereço do site leva "&t=hora" para o app não reaproveitar a página guardada (até 10 min velha).
+   - Se sair um app novo (APK/EXE), aparece um aviso com o link da release.
+   A versão e de onde o jogo está rodando aparecem no menu de Configurações. */
+const GAME_VERSION = '1.2.0';
 const APP_SITE = 'https://heitorcoser.github.io/mare-dourada/';
+const APP_INFO = { version: GAME_VERSION, where: 'site' };
+function showVersion() { const el = document.getElementById('verInfo'); if (el) el.textContent = 'Versão ' + APP_INFO.version + ' · ' + APP_INFO.where; }
 (function appShell() {
   const qs = new URLSearchParams(location.search);
   const app = qs.get('app'), onSite = location.hostname === 'heitorcoser.github.io';
-  if (app === 'exe' && !onSite && navigator.onLine) {
-    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    if (ctl) setTimeout(() => ctl.abort(), 3500);
-    fetch(APP_SITE + 'version.json?t=' + Date.now(), { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
-      .then(r => r.ok ? r.json() : null)
-      .then(j => { if (j && j.version) location.replace(APP_SITE + '?app=exe&shell=' + encodeURIComponent(qs.get('shell') || GAME_VERSION)); })
-      .catch(() => { });
+  APP_INFO.where = onSite ? (app ? 'app ' + (app === 'apk' ? 'Android' : 'Windows') + ', atualizado pelo site' : 'site') : 'cópia local';
+  showVersion();
+  const goSite = (a, shell) => location.replace(APP_SITE + '?app=' + a + '&shell=' + encodeURIComponent(shell || GAME_VERSION) + '&t=' + Date.now());
+  if (!onSite) {
+    const tryOnline = (a, shell) => {
+      if (!navigator.onLine) return;
+      const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      if (ctl) setTimeout(() => ctl.abort(), 4000);
+      fetch(APP_SITE + 'version.json?t=' + Date.now(), { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+        .then(r => r.ok ? r.json() : null).then(j => { if (j && j.version) goSite(a, shell); }).catch(() => { });
+    };
+    if (app === 'exe' || app === 'apk') tryOnline(app, qs.get('shell'));     // compatível com os apps antigos
+    else fetch('app.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(info => {
+      if (!info || !info.app) return;
+      APP_INFO.where = 'app ' + (info.app === 'apk' ? 'Android' : 'Windows') + ', cópia local (sem internet)'; showVersion();
+      tryOnline(info.app, info.shell);
+    }).catch(() => { });
     return;
   }
   const shell = qs.get('shell');
   if (!app || !shell) return;
-  const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+  const newer = (x0, y0) => { const x = x0.split('.').map(Number), y = y0.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
   fetch('https://api.github.com/repos/Heitorcoser/mare-dourada/releases/latest').then(r => r.json()).then(j => {
     const tag = String(j.tag_name || '').replace(/^v/, '');
     if (!tag || !newer(tag, shell)) return;
     const file = app === 'apk' ? 'MareDourada.apk' : 'MareDourada-win64.exe';
-    const a = (j.assets || []).find(x => x.name === file);
+    const asset = (j.assets || []).find(x => x.name === file);
     const box = document.createElement('a');
-    box.href = a ? a.browser_download_url : j.html_url; box.target = '_blank'; box.rel = 'noopener';
+    box.href = asset ? asset.browser_download_url : j.html_url; box.target = '_blank'; box.rel = 'noopener';
     box.textContent = 'App novo (v' + tag + ') disponível · toque para baixar';
     box.style.cssText = 'position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:50;' +
       'padding:9px 16px;border-radius:999px;background:#2fd0bc;color:#0f2230;font:700 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 6px 20px rgba(0,0,0,.35)';
-    document.body.appendChild(box); setTimeout(() => box.remove(), 15000);
+    document.body.appendChild(box); setTimeout(() => box.remove(), 20000);
   }).catch(() => { });
 })();
 

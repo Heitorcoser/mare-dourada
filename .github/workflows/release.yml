@@ -24,6 +24,8 @@ jobs:
           V="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = tag ] || V=0.0.0-dev
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$V\"/" neutralino.config.json
           grep '"version"' neutralino.config.json
+          # marca a cópia do jogo dentro do .exe (o site não tem este arquivo): é por ele que o jogo sabe que está no app
+          printf '{"app":"exe","shell":"%s"}\n' "$V" > resources/app.json
       - name: Monta o EXE (Neutralinojs)
         run: |
           npx -y @neutralinojs/neu@11.8.0 update
@@ -50,6 +52,8 @@ jobs:
         run: |
           mkdir -p android/app/src/main/assets/www
           cp -r resources/* android/app/src/main/assets/www/
+          V="${GITHUB_REF_NAME#v}"; [ "$GITHUB_REF_TYPE" = tag ] || V=0.0.0-dev
+          printf '{"app":"apk","shell":"%s"}\n' "$V" > android/app/src/main/assets/www/app.json
       - name: Chave privada (opcional, segredo ANDROID_KEYSTORE_B64)
         env:
           KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}

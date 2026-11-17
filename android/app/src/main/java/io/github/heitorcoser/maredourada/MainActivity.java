@@ -67,7 +67,8 @@ public class MainActivity extends Activity {
         });
 
         if (state != null) { web.restoreState(state); return; }
-        if (online()) web.loadUrl(SITE + "?app=apk&shell=" + BuildConfig.SHELL_VERSION);
+        // "&t=" faz o WebView buscar a página nova em vez de reaproveitar a guardada
+        if (online()) web.loadUrl(SITE + "?app=apk&shell=" + BuildConfig.SHELL_VERSION + "&t=" + System.currentTimeMillis());
         else { fellBack = true; web.loadUrl(LOCAL); }
     }
 
