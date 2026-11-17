@@ -2174,8 +2174,17 @@ function stepSkim(dt, ax, ay, jump, act, tgt) {
     sp = Math.hypot(S.vx, S.vz);
     // atrito: lâmina d'água desliza, areia molhada segura, areia seca trava, água funda afunda a prancha
     // na água funda a prancha PLANA enquanto tem velocidade (atrito baixo); devagar ela afunda e freia forte
-    const mu = depth > 0.3 ? (sp > 3.2 ? 2.4 + depth * 3.2 : 2.6 + depth * 4) : film ? 0.3 : lerp(16, 0.9, smooth(0.3, 0.85, wet));
+    // rápido ela plana longe (dá para chegar na arrebentação da beira e pegar onda); devagar afunda e freia forte
+    const mu = depth > 0.3 ? (sp > 4.5 ? 0.9 + depth * 0.9 : sp > 2.5 ? 1.8 + depth * 2 : 2.6 + depth * 4) : film ? 0.3 : lerp(16, 0.9, smooth(0.3, 0.85, wet));
     sp = Math.max(0, sp - (mu + 0.035 * sp) * dt);
+    // espuma chegando: a água branca te empurra de volta para a areia (dá para surfar a espuma em pé)
+    const foHere = depth > 0.15 ? waveAt(x0, z0, _lw).foam : 0;
+    if (foHere > 0.45) {
+      const kf = Math.min(1, (foHere - 0.45) * 1.6);
+      let vx2 = Math.sin(Math.atan2(S.vx, S.vz)) * sp, vz2 = Math.cos(Math.atan2(S.vx, S.vz)) * sp;
+      vz2 += (-C * 0.7 - vz2) * kf * 1.8 * dt;
+      S.vx = vx2; S.vz = vz2; sp = Math.hypot(vx2, vz2);
+    }
     // a quilha segura: a velocidade segue o bico
     const vAng = Math.atan2(S.vx, S.vz), diff = angDiff(S.heading, vAng);
     const nAng = vAng + diff * (1 - Math.exp(-5 * dt));
@@ -2209,11 +2218,11 @@ function stepSkim(dt, ax, ay, jump, act, tgt) {
     if (jump && sp > 1.5) { k.air = true; k.vy = 3.4 + sp * 0.12; k.y = y + 0.03; k.spin = 0; splashSound(0.25); emit(S.pos.x, y, S.pos.z, 0, 1.5, 0, 10, 0.7); }
     // wrap: entrou na onda da beira subindo a parede com velocidade → passa a surfar
     const dNow = waterH(S.pos.x, S.pos.z) - terrainH(S.pos.x, S.pos.z);
-    if (!k.air && dNow > 0.5 && sp > 3) {
+    if (!k.air && dNow > 0.4 && sp > 2.4) {
       // precisa ser uma onda de verdade: água acima do nível do mar parado (maré alta não conta) e você subindo a rampa
       const g = grad(S.pos.x, S.pos.z), climb = S.vx * g.gx + S.vz * g.gz;
       const elev = waterH(S.pos.x, S.pos.z) - Math.max(LEVEL * (1 - smooth(40, 120, S.pos.z)), terrainH(S.pos.x, S.pos.z));
-      if (elev > 0.45 && climb > 0.5) {
+      if (elev > 0.3 && climb > 0.25) {
         S.mode = 'ride'; S.carveT = 0; S.lostT = 0; S.tubeT = 0; S.turn = null; S.pumpPh = 0; S.floatT = 0; S.proneRide = false;
         S.popQ0 = hero.quaternion.clone(); S.popP0 = hero.position.clone();
         if (!S.ride) S.ride = newRide();
