@@ -322,6 +322,10 @@ function terrainH(x, z) {
   y += 0.18 * Math.sin(x * 0.045 + 0.5) * Math.sin(z * 0.06);
   const dz = Math.max(0, -z - 35); y += Math.min(dz * 0.04, 2) * (0.7 + 0.3 * Math.sin(x * 0.03));
   const ax = Math.abs(x); y += smooth(BH + 5, BH + 60, ax) * 16 * (1 - smooth(110, 200, z));
+  /* Banco de areia a ~140 m da areia (levemente ondulado ao longo da praia), ~2,6 m mais raso que o fundo em volta,
+     e um canal mais fundo a ~88 m. As ondas quebram no banco, a água branca cruza o canal (onde algumas renascem)
+     e só depois chega na beira, como em muita praia de verdade. */
+  y += 2.6 * Math.exp(-Math.pow((z - 140 - 8 * Math.sin(x * 0.012)) / 24, 2)) - 0.9 * Math.exp(-Math.pow((z - 88) / 22, 2));
   return y;
 }
 /* ---------- Ajustes salvos ---------- */
@@ -479,7 +483,8 @@ function waveParams(n) {
   // onda que quebra colada na areia não pode ser maior que a profundidade deixa (~1 m de onda em 0,7 m d'água):
   // antes a Beira e a Surgente chegavam com 2 a 3,6 m a 6 m da areia, onde a água tem ~30 cm
   if (ty.maxH) mult = Math.min(mult, ty.maxH / 3.7);
-  const H0 = 3.7 * mult, zB = ty.zAbs ? ty.zAbs : clamp(80 + 24 * mult + ty.zOff + B.zAdd, 60, B.zMax);
+  // quebram no banco de areia (~120-180 m da areia; antes ~100 m): a surfada dura uns 50% mais
+  const H0 = 3.7 * mult, zB = ty.zAbs ? ty.zAbs : clamp(110 + 22 * mult + ty.zOff + B.zAdd, 85, B.zMax);
   /* Largura: toda onda cobre praticamente a praia inteira (~720 m), para dar tempo de surfar. Só sobra uma faixa
      de mar liso no fim (60 a 90 m) para sair da onda quando ela acaba. */
   const hw = BH - 60;
@@ -490,8 +495,8 @@ function waveParams(n) {
   const rf = ty.mode === 1 && !ty.zAbs && !lull && zB > 90 && hash1(n + 71.9) < 0.35 + 0.25 * st;
   let rp = null, hShore = H0 * Math.max(0.45, Math.exp(-Math.max(0, zB - 24) / Ld));
   if (rf) {
-    const zR = clamp(zB - 45 - 15 * hash1(n + 72.4), 36, 60);
-    const zB2 = clamp(zR - 12 - 8 * hash1(n + 73.1), 24, 44);
+    const zR = clamp(zB - 45 - 15 * hash1(n + 72.4), 40, 90);     // renasce no canal
+    const zB2 = clamp(zR - 14 - 10 * hash1(n + 73.1), 26, 60);
     const mult2 = (0.45 * (zR - SHORE) * BETA + 0.2) / 3.7;        // do tamanho da água branca que chega ali
     rp = { zR, zB2, mult2, vp2: hash1(n + 75.2) < 0.55 ? 6 + 4 * hash1(n + 75.9) : 99, hollow2: 0.9 + 0.5 * hash1(n + 76.6),
       dx2: (hash1(n + 77.3) - 0.5), hw2: hw };
@@ -578,7 +583,7 @@ function updateWaves() {
     // queda livre do lábio (onda gigante cai por mais tempo). Perto da praia a onda que ainda não quebrou já perdeu
     // altura pelo limite de profundidade (veja waveAt), então o lábio da quebra na beira cai de uma altura menor.
     let Hland = w.height;
-    if (!zAbs) { const dl = 1 - smooth(45, 85, w.zc); Hland = lerp(Hland, Math.min(Hland, depthCap(w.zc)), dl); }
+    if (!zAbs) { const dl = 1 - smooth(45, 85, w.zc); Hland = lerp(Hland, Math.min(Hland, Math.max(0.3, -terrainH(0, w.zc)) + 0.5), dl); }
     w.land = clamp(Math.sqrt(2 * Hland / 9.8) * 1.15 * landK, 0.6, 3.6);   // Pipeline: lábio cai de mais longe
     w.e = T - (n * P + (Z0 - w.zBreak) / C);                     // tempo desde que o pico quebrou
     w.eShore = T - (n * P + (Z0 - (zAbs ? 13 : 24)) / C);      // na beira tudo quebra
@@ -638,7 +643,7 @@ function waveAt(x, z, out = _wo) {
     const w = W[i];
     const a = brokenAge(w, x), hl = hollowAt(w, x), hc = Math.min(hl, 1);
     const appr = clamp((Z0 - z) / 50, 0, 1);
-    const shoal = clamp((250 - z) / 150 + (w.shB || 0), 0, 1);
+    const shoal = clamp((250 - z) / 100 + (w.shB || 0), 0, 1);
     let amp = (1.3 + 2.4 * shoal * shoal) * appr;
     // onda gigante: empina bem antes e desaba devagar (tudo proporcional ao tamanho). Antes ela ia de rampa de 36 m a
     // parede de 7 m em 1,6 s e de 22 m a 4 m em 3 s: a água "se deformava toda" na hora da quebra. Ondas normais (kF = 1) iguais.
@@ -743,6 +748,8 @@ float terrainH(vec2 p){
   y += 0.18*sin(x*0.045+0.5)*sin(z*0.06);
   float dz=max(0.0,-z-35.0); y += min(dz*0.04,2.0)*(0.7+0.3*sin(x*0.03));
   float ax=abs(x); y += smoothstep(BH+5.0,BH+60.0,ax)*16.0*(1.0-smoothstep(110.0,200.0,z));
+  float qb=(z-140.0-8.0*sin(x*0.012))/24.0, qt=(z-88.0)/22.0;
+  y += 2.6*exp(-qb*qb) - 0.9*exp(-qt*qt);
   return y;
 }
 float swashFront(vec4 s, float x, out float up, out float u, out float th, out float k){
@@ -773,7 +780,7 @@ void waveAt(vec2 p, out float h, out float foam){
     { float zBpH=w.x+7.5*b.y; hl*=smoothstep(zBpH-55.0,zBpH-25.0,zBpH-7.5*spread); }
     float hc=min(hl,1.0);
     float appr=clamp((Z0-z)/50.0,0.0,1.0);
-    float shoal=clamp((250.0-z)/150.0+dd.z,0.0,1.0);
+    float shoal=clamp((250.0-z)/100.0+dd.z,0.0,1.0);
     float amp=(1.3+2.4*shoal*shoal)*appr;
     float kF=max(dd.w,1.0), kB=min(kF,3.0), sk=sqrt(kF);
     float pre=smoothstep(-3.0*sk,0.0,a);
@@ -1045,7 +1052,8 @@ const lipMat = new THREE.ShaderMaterial({
     float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
       return mix(mix(hash2(i),hash2(i+vec2(1.0,0.0)),f.x),mix(hash2(i+vec2(0.0,1.0)),hash2(i+vec2(1.0,1.0)),f.x),f.y); }
     float terrH(vec2 p){ float x=p.x, z=p.y; float y=max((12.0-z)*0.055,-7.0); y+=0.18*sin(x*0.045+0.5)*sin(z*0.06);
-      float dz=max(0.0,-z-35.0); y+=min(dz*0.04,2.0)*(0.7+0.3*sin(x*0.03)); return y; }
+      float dz=max(0.0,-z-35.0); y+=min(dz*0.04,2.0)*(0.7+0.3*sin(x*0.03));
+      float qb=(z-140.0-8.0*sin(x*0.012))/24.0, qt=(z-88.0)/22.0; y+=2.6*exp(-qb*qb)-0.9*exp(-qt*qt); return y; }
     void main(){
       if(vA<0.01) discard;
       vec3 V=normalize(cameraPosition-vWorld);
@@ -3247,7 +3255,7 @@ function applyQuality() {
 function waveLabel() {
   // altura que a onda tem DE VERDADE ao quebrar: a que quebra muito longe ainda não empinou tudo (mesma conta do waveAt)
   const c = waveCfg(), B = BEACHES[c.beach] || BEACHES.farol, mult = Math.min(c.ws, B.max) * B.mult;
-  const real = m => { const zb = clamp(80 + 24 * m + B.zAdd, 60, B.zMax), sh = clamp((250 - zb) / 150 + B.shB, 0, 1); return 3.7 * m * (1.3 + 2.4 * sh * sh) / 3.7 * Math.min(1, (Z0 - zb) / 50); };
+  const real = m => { const zb = clamp(110 + 22 * m + B.zAdd, 85, B.zMax), sh = clamp((250 - zb) / 100 + B.shB, 0, 1); return 3.7 * m * (1.3 + 2.4 * sh * sh) / 3.7 * Math.min(1, (Z0 - zb) / 50); };
   const f = v => v.toFixed(1).replace('.', ',');
   return B.name + ' · ≈ ' + f(real(mult)) + ' m · séries até ' + f(real(mult * 1.66)) + ' m';
 }
@@ -3384,7 +3392,7 @@ function netSend() {
   const bp = [r2(_np.x), r2(_np.y), r2(_np.z)], bq = [r3(_nq.x), r3(_nq.y), r3(_nq.z), r3(_nq.w)];
   const j = []; for (const jt of JL()) { const q = jt.quaternion; j.push(r3(q.x), r3(q.y), r3(q.z), r3(q.w)); }
   const pr = {
-    v: 1, bd: CFG.board, pt: CFG.paint, nm: NET.nick || '', ts: Date.now(), ja: NET.joinedAt, m: S.mode, hp, hq, bp, bq, j, hy: r3(J.hips.position.y),
+    v: 1, gv: GAME_VERSION, bd: CFG.board, pt: CFG.paint, nm: NET.nick || '', ts: Date.now(), ja: NET.joinedAt, m: S.mode, hp, hq, bp, bq, j, hy: r3(J.hips.position.y),
     vx: r2(S.vx || 0), vz: r2(S.vz || 0),
     sc: [Math.round(S.total), Math.round(S.best), Math.round(S.ride ? S.ride.pts : 0)],
     cfg: { ws: CFG.waveSize, bc: CFG.beach, ty: TYPE_KEYS.filter(k => CFG.types[k]).join(',') },
@@ -3441,12 +3449,39 @@ function onRoomPeers(ch) {
     }
     if (!NET.isHost && p.peer === NET.hostPeer) {
       const cfgTy = typeof (pr.cfg && pr.cfg.ty) === 'string' ? pr.cfg.ty.split(',') : null;
-      if (cfgTy) { const types = {}; for (const k of TYPE_KEYS) types[k] = cfgTy.includes(k); NET.hostCfg = { ws: clamp(+pr.cfg.ws || 1, 0.5, 5), types, beach: BEACHES[pr.cfg.bc] ? pr.cfg.bc : 'farol' }; if (!$('settings').hidden) syncSettingsUI(); }
+      if (cfgTy) {
+        const types = {}; for (const k of TYPE_KEYS) types[k] = cfgTy.includes(k);
+        const hc = { ws: clamp(+pr.cfg.ws || 1, 0.5, 5), types, beach: BEACHES[pr.cfg.bc] ? pr.cfg.bc : 'farol' };
+        // as ondas guardam as regras do momento em que nasceram: as que já estavam no mar com as SUAS regras ficavam
+        // diferentes das do anfitrião por ~1 minuto (mais, se ele mexesse nos ajustes). Agora elas são refeitas.
+        const key = JSON.stringify(hc);
+        if (key !== NET.hostCfgKey) { NET.hostCfgKey = key; WCACHE.clear(); }
+        NET.hostCfg = hc; if (!$('settings').hidden) syncSettingsUI();
+      }
     }
+  }
+  for (const p of peers) {
+    if (p.sameTab || p.kind !== 'viewer' || !p.presence || p.presence.v !== 1) continue;
+    const gv = p.presence.gv || 'antiga';
+    if (gv !== GAME_VERSION) versionWarn(peerName(p), gv, p.peer === NET.hostPeer);
   }
   for (const p of ch.left) { dropAvatar(p.peer); delete NET.seenEv[p.peer]; }
   if (NET.isHost) { NET.offSamples.length = 0; }
   renderPlayers(peers);
+}
+const VWARNED = {};
+function versionWarn(name, gv, isHost) {
+  const k = name + '|' + gv; if (VWARNED[k]) return; VWARNED[k] = true;
+  const cmp = (x0, y0) => { const x = String(x0).split('.').map(Number), y = String(y0).split('.').map(Number); for (let j = 0; j < 3; j++) { if ((x[j] || 0) !== (y[j] || 0)) return (x[j] || 0) > (y[j] || 0) ? 1 : -1; } return 0; };
+  const older = gv === 'antiga' || cmp(gv, GAME_VERSION) < 0;
+  const box = document.createElement('div');
+  box.textContent = (older
+    ? name + ' está na versão ' + gv + ' (você: ' + GAME_VERSION + '). As ondas dele ficam diferentes: ele precisa atualizar (Ctrl+F5 no site, ou baixar o app novo).'
+    : name + ' está numa versão mais nova (' + gv + '). As suas ondas ficam diferentes: atualize (Ctrl+F5 no site, ou baixe o app novo).');
+  box.style.cssText = 'position:fixed;left:50%;top:calc(64px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:60;max-width:min(92vw,560px);' +
+    'padding:10px 16px;border-radius:14px;background:#ffd166;color:#0f2230;font:700 13px system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.35);text-align:center';
+  document.body.appendChild(box); setTimeout(() => box.remove(), 15000);
+  feed('Versões diferentes: ' + name + ' ' + gv + ' · você ' + GAME_VERSION);
 }
 function renderPlayers(peers) {
   NET.lastPeers = peers;
@@ -3714,7 +3749,7 @@ function mpRender() {
    - O endereço do site leva "&t=hora" para o app não reaproveitar a página guardada (até 10 min velha).
    - Se sair um app novo (APK/EXE), aparece um aviso com o link da release.
    A versão e de onde o jogo está rodando aparecem no menu de Configurações. */
-const GAME_VERSION = '1.2.0';
+const GAME_VERSION = '1.2.1';
 const APP_SITE = 'https://heitorcoser.github.io/mare-dourada/';
 const APP_INFO = { version: GAME_VERSION, where: 'site' };
 function showVersion() { const el = document.getElementById('verInfo'); if (el) el.textContent = 'Versão ' + APP_INFO.version + ' · ' + APP_INFO.where; }
