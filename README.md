@@ -21,13 +21,26 @@ Crie e envie uma tag (`git tag v1.2.0 && git push origin v1.2.0`). O workflow `r
 
 ## Multiplayer
 
-1. Aperte **P** (ou o botão **Multiplayer**), escreva seu nome e clique em **Criar sala**.
-2. Passe o **código** (ex.: `K7QXM`) para os amigos, ou clique em **Copiar convite** e mande o link.
-3. Os amigos abrem o jogo, apertam **P**, digitam o código e clicam em **Entrar**. Até 8 surfistas por sala.
+Aperte **P** (ou o botão **Multiplayer**) e escreva seu nome. Há dois tipos de sala:
 
-Funciona pela internet, no PC e no celular, sem VPN e sem estar na mesma rede. É a mesma técnica do [Losters](https://github.com/Heitorcoser/Losters): [PeerJS](https://peerjs.com) (WebRTC), com o servidor gratuito do PeerJS só para os aparelhos se acharem, STUN para atravessar o roteador e um servidor TURN gratuito quando a rede não deixa conectar direto. Cada surfista manda só o próprio estado; o mar é igual para todos porque as ondas são uma conta do tempo, e o relógio e as regras das ondas são de quem criou a sala. Se quem criou a sala sair, ela acaba.
+**Sala pública** (como no Gorilla Tag)
+- **Entrar numa sala pública**: o jogo acha uma sala aberta com gente jogando, ou abre uma nova.
+- **Ver salas abertas** mostra a lista com o código e quantos surfistas há em cada uma; dá para entrar também digitando o código público ou por um link `?publica=CÓDIGO`.
+- Até 10 surfistas. Tudo passa por um servidor público de mensagens (MQTT: HiveMQ, com o Mosquitto de reserva), então **ninguém vê o IP de ninguém**. Tem chat de texto e não tem voz.
+- A segurança é fraca de propósito: qualquer um que souber o código entra. Por isso nada pessoal viaja: só apelido, posição, placar e chat.
 
-Aberto como artefato no claude.ai, o jogo usa a sala do próprio claude.ai: quem tem acesso ao link e está logado cai na mesma praia automaticamente.
+**Sala com amigos** (com voz)
+1. **Criar sala** gera um código (ex.: `K7QXM`). Passe o código ou clique em **Copiar convite**.
+2. Os amigos digitam o código e clicam em **Entrar**. Até 8 surfistas.
+3. **Ligar a voz** e segurar **V** para falar. O volume cai com a distância na praia. A voz liga os aparelhos direto (PeerJS/WebRTC, a mesma técnica do [Losters](https://github.com/Heitorcoser/Losters)), então os amigos da sala veem o IP uns dos outros: use só com quem você conhece.
+
+Em qualquer sala: **Enter** abre o chat de texto (120 letras, uma mensagem a cada 1,2 s) e cada jogador pode ser **silenciado** na janela do Multiplayer. Quem entrou primeiro (★) escolhe a praia, o tamanho e os tipos de onda para todos.
+
+Aberto como artefato no claude.ai, o jogo usa a sala do próprio claude.ai: quem tem acesso ao link e está logado cai na mesma praia automaticamente (com chat de texto; salas públicas e voz só no site e nos apps).
+
+## Brechas (F8)
+
+Mods que mudam o jogo **só no seu aparelho**: velocidade, gravidade da Lua, nunca tomar vaca, prancha gigante, andar sobre a água e "minhas ondas" (usar os seus ajustes de onda mesmo sem ser o anfitrião). Os outros veem um selo "mod" no seu nome, mas o jogo deles continua normal. Não existe console para colar código, para ninguém conseguir te enganar e rodar algo que leia os seus dados.
 
 ## Comandos
 
@@ -46,6 +59,9 @@ Aberto como artefato no claude.ai, o jogo usa a sala do próprio claude.ai: quem
 | T | fim de tarde ou meio-dia |
 | O | ajustes de gráficos, efeitos e ondas |
 | P | multiplayer (criar ou entrar numa sala) |
+| Enter | chat de texto |
+| V (segurar) | falar no chat de voz (sala com amigos) |
+| F8 | brechas (mods só no seu jogo) |
 | R | voltar para a areia |
 
 ## O que tem
@@ -69,7 +85,7 @@ Aberto como artefato no claude.ai, o jogo usa a sala do próprio claude.ai: quem
 
 ## Rodar a partir do código
 
-O jogo é um único `resources/index.html` com three.js r128 e PeerJS 1.5.4 (licença MIT em `resources/js/PEERJS-LICENSE`) em `resources/js/`. Para gerar o executável com [Neutralinojs](https://neutralino.js.org):
+O jogo é um único `resources/index.html` com three.js r128 e PeerJS 1.5.4 e mqtt.js 5.10.1 (licenças MIT em `resources/js/PEERJS-LICENSE` e `resources/js/MQTT-LICENSE`) em `resources/js/`. Para gerar o executável com [Neutralinojs](https://neutralino.js.org):
 
 ```bash
 npx @neutralinojs/neu@11.8.0 update

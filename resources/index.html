@@ -83,6 +83,15 @@ canvas#c{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
 #feed .fd{background:var(--ink-soft);border-radius:10px;padding:5px 10px;font-size:13px;font-weight:600;animation:fd 6s ease-out forwards}
 @keyframes fd{0%{opacity:0;transform:translateX(-10px)}6%{opacity:1;transform:none}85%{opacity:1}100%{opacity:0}}
 @media (max-width:640px){#players{display:none!important}#feed{bottom:calc(250px + env(safe-area-inset-bottom,0px))}}
+#chatBox{left:calc(14px + env(safe-area-inset-left,0px));bottom:calc(26px + env(safe-area-inset-bottom,0px));pointer-events:auto;width:min(84vw,420px);z-index:8}
+#chatBox input{width:100%;box-sizing:border-box;font:600 15px var(--body);padding:9px 12px;border-radius:10px;border:1px solid rgba(251,246,236,.35);background:rgba(15,34,48,.88);color:var(--foam)}
+#chatBox input:focus-visible{outline:2px solid var(--sea);outline-offset:2px}
+#feed .fd.chat{animation-duration:10s}
+.mplist li{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:2px 0}
+.mplist li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet button.mini{padding:3px 9px;font-size:11.5px;flex:none}
+.modrow{display:flex;gap:10px;align-items:center;font-size:14px;padding:5px 2px;cursor:pointer}
+.modrow input{width:18px;height:18px;accent-color:var(--coral);flex:none}
 #pops{top:30%;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px}
 .pop{font-family:var(--display);font-size:clamp(22px,4vw,40px);color:#ffd166;text-shadow:0 3px 0 rgba(15,34,48,.6),0 0 24px rgba(255,122,89,.5);animation:pop 1.7s ease-out forwards;white-space:nowrap}
 .pop small{display:block;text-align:center;font-family:var(--body);font-size:15px;font-weight:700;color:var(--foam);letter-spacing:.1em}
@@ -196,11 +205,14 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div><kbd>Espaço</kbd> subindo a parede = aéreo, gire com <kbd>A</kbd>/<kbd>D</kbd></div>
     <div>Skim: correndo na areia molhada com a prancha, <kbd>Espaço</kbd> · no skim <kbd>Espaço</kbd> = ollie (gire com <kbd>A</kbd>/<kbd>D</kbd>)</div>
     <div><kbd>B</kbd> prancha, pinturas e desafios</div>
+    <div><kbd>Enter</kbd> chat · segure <kbd>V</kbd> para falar (sala com amigos)</div>
+    <div><kbd>F8</kbd> brechas (mods só no seu jogo)</div>
     <div><kbd>R</kbd> voltar para a areia</div>
   </div>
 
   <div id="pops" class="hud"></div>
   <div id="feed" class="hud" aria-live="polite"></div>
+  <div id="chatBox" class="hud" hidden><input id="chatIn" type="text" maxlength="120" autocomplete="off" placeholder="Mensagem · Enter manda · Esc fecha" aria-label="Mensagem do chat"></div>
   <div id="wave" class="hud"></div>
   <div id="hint" class="hud"></div>
 
@@ -209,6 +221,14 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <button class="tbtn" id="tAct" type="button">Prancha</button>
     <button class="tbtn" id="tJump" type="button">Pular</button>
     <button class="tbtn" id="tDuck" type="button">Abaixar</button>
+  </div>
+
+  <div id="modSheet" class="sheet" hidden role="dialog" aria-labelledby="modTitle">
+    <div class="sheet-head">
+      <h2 id="modTitle">Brechas</h2>
+      <button id="modClose" type="button" aria-label="Fechar brechas">Fechar</button>
+    </div>
+    <section id="modBody"></section>
   </div>
 
   <div id="boardSheet" class="sheet" hidden role="dialog" aria-labelledby="boardTitle">
@@ -314,7 +334,9 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const angDiff = (a, b) => { let d = (a - b) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; };
 
 /* ---------- Mundo: mar e areia (mesmas fórmulas no JS e no shader) ---------- */
-const SHORE = 12, C = 7.5, P = 13, Z0 = 260;
+// ondas nascem a 350 m e chegam a cada 16 s (swell de período longo): dá tempo de crescer e quebrar lá fora e de abrir
+// pela praia antes de chegar na areia (antes nasciam a 260 m, a cada 13 s, e só ficavam inteiras perto dos 150 m)
+const SHORE = 12, C = 7.5, P = 16, Z0 = 350;
 const BH = 420;   // meia largura da praia (era ~155): mapa quase 3× maior, com espaço de sobra para surfar ao longo da onda
 function hash1(n) { const s = Math.sin(n * 12.9898) * 43758.5453; return s - Math.floor(s); }
 function terrainH(x, z) {
@@ -332,6 +354,12 @@ function terrainH(x, z) {
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
 const CFG = { quality: IS_TOUCH ? 'medio' : 'alto', board: 'short', paint: 'classica', beach: 'farol', waveSize: 1.0, weather: true, bloom: true, flare: true, rays: true, grain: true, drops: true, mist: true, shake: true, types: null };
 try { Object.assign(CFG, JSON.parse(localStorage.getItem('mare-dourada-cfg') || '{}')); } catch (e) { }
+// brechas (mods só no seu aparelho), voz, chat e o resto do multiplayer social; veja mais abaixo
+const MODS = { speed: 1, lowGrav: false, noWipe: false, bigBoard: false, waterWalk: false, ownWaves: false };
+const modsOn = () => MODS.speed !== 1 || MODS.lowGrav || MODS.noWipe || MODS.bigBoard || MODS.waterWalk || MODS.ownWaves;
+const VOICE = { on: false, stream: null, calls: new Map(), audios: new Map(), talking: false };
+const CHAT = { last: 0, n: 0, seen: {} };
+const ODD = { cursed: false, pale: null, paleOn: false, paleT: 200, paleLife: 0, px: 0, pz: 0, lamp: null, morseQ: null, morseT: 120, morseI: 0, morseS: 0, ghostUntil: 0, curseT: 0, said: 0, cfg: null };
 function saveCfg() { try { localStorage.setItem('mare-dourada-cfg', JSON.stringify(CFG)); } catch (e) { } }
 if (typeof CFG.weather !== 'boolean') CFG.weather = true;
 const QUAL = {
@@ -375,11 +403,11 @@ const TYPE_KEYS = Object.keys(WTYPES);
    max = limite do tamanho no ajuste · mult = tamanho base · hAdd = quanto o fundo raso deixa a onda mais oca
    zAdd/zMax = quebra mais para fora ou mais perto · shB = o fundo junta a energia mais cedo (a onda já chega grande lá fora) */
 const BEACHES = {
-  farol:  { name: 'Praia do Farol', desc: 'areia, de tudo um pouco', max: 2.5, types: null, mult: 1, hAdd: 0, zAdd: 0, zMax: 195, shB: 0 },
-  baia:   { name: 'Baía Mansa', desc: 'fundo suave: ondas cheias para treinar', max: 1.5, types: ['cheia', 'pico', 'ponta', 'beira', 'surgente'], mult: 0.75, hAdd: -0.25, zAdd: 15, zMax: 195, shB: 0 },
-  recife: { name: 'Recife da Laje', desc: 'pedra rasa: tubos grossos e rápidos', max: 3.0, types: ['laje', 'cunha', 'direita', 'esquerda', 'dupla', 'pico', 'rapida', 'pipeline'], mult: 1.15, hAdd: 0.2, zAdd: -8, zMax: 195, shB: 0.1 },
-  ponta:  { name: 'Ponta do Molhe', desc: 'promontório e molhe: paredes longas', max: 2.5, types: ['ponta', 'cunha', 'direita', 'esquerda', 'rapida'], mult: 1, hAdd: 0, zAdd: 5, zMax: 195, shB: 0 },
-  canhao: { name: 'Canhão', desc: 'um cânion no fundo junta a energia: ondas gigantes', max: 5.0, types: ['pico', 'dupla', 'fora', 'fechadeira', 'laje'], mult: 1.6, hAdd: 0.1, zAdd: 25, zMax: 205, shB: 0.45 }   // quebra a 205 m: a onda nasce a 260 m e só termina de crescer aos 210 m
+  farol:  { name: 'Praia do Farol', desc: 'areia, de tudo um pouco', max: 2.5, types: null, mult: 1, hAdd: 0, zAdd: 0, zMax: 240, shB: 0 },
+  baia:   { name: 'Baía Mansa', desc: 'fundo suave: ondas cheias para treinar', max: 1.5, types: ['cheia', 'pico', 'ponta', 'beira', 'surgente'], mult: 0.75, hAdd: -0.25, zAdd: 15, zMax: 225, shB: 0 },
+  recife: { name: 'Recife da Laje', desc: 'pedra rasa: tubos grossos e rápidos', max: 3.0, types: ['laje', 'cunha', 'direita', 'esquerda', 'dupla', 'pico', 'rapida', 'pipeline'], mult: 1.15, hAdd: 0.2, zAdd: -8, zMax: 235, shB: 0.1 },
+  ponta:  { name: 'Ponta do Molhe', desc: 'promontório e molhe: paredes longas', max: 2.5, types: ['ponta', 'cunha', 'direita', 'esquerda', 'rapida'], mult: 1, hAdd: 0, zAdd: 5, zMax: 240, shB: 0 },
+  canhao: { name: 'Canhão', desc: 'um cânion no fundo junta a energia: ondas gigantes', max: 5.0, types: ['pico', 'dupla', 'fora', 'fechadeira', 'laje'], mult: 1.6, hAdd: 0.1, zAdd: 25, zMax: 285, shB: 0.45 }   // quebra até 285 m: a onda nasce a 350 m e termina de crescer aos 300 m
 };
 const BEACH_KEYS = Object.keys(BEACHES);
 if (!CFG.types || typeof CFG.types !== 'object') CFG.types = {};
@@ -484,7 +512,8 @@ function waveParams(n) {
   // antes a Beira e a Surgente chegavam com 2 a 3,6 m a 6 m da areia, onde a água tem ~30 cm
   if (ty.maxH) mult = Math.min(mult, ty.maxH / 3.7);
   // quebram no banco de areia (~120-180 m da areia; antes ~100 m): a surfada dura uns 50% mais
-  const H0 = 3.7 * mult, zB = ty.zAbs ? ty.zAbs : clamp(110 + 22 * mult + ty.zOff + B.zAdd, 85, B.zMax);
+  // quanto maior a onda e mais rápido o lábio abre, mais longe ela quebra (normal ~150 m, série ~180 m, gigante até 285 m)
+  const H0 = 3.7 * mult, zB = ty.zAbs ? ty.zAbs : clamp(125 + 28 * mult + ty.zOff + B.zAdd + (ty.vp < 50 ? Math.max(0, ty.vp - 7.5) * 3 : 0), 90, B.zMax);
   /* Largura: toda onda cobre praticamente a praia inteira (~720 m), para dar tempo de surfar. Só sobra uma faixa
      de mar liso no fim (60 a 90 m) para sair da onda quando ela acaba. */
   const hw = BH - 60;
@@ -543,7 +572,7 @@ function updateWaves() {
     const w = W[i];
     w.n = n; w.zc = Z0 - C * (T - n * P); w.mult = mult; w.set = set; w.type = type;
     w.ph2 = wp.ph2;
-    w.mode = ty.mode; w.vp = ty.vp; w.hollow = ty.hollow > 0 ? Math.max(0.3, ty.hollow + wp.hAdd + (wp.wH || 0)) : 0; w.shB = wp.shB;
+    w.mode = ty.mode; w.vp = ty.vp; w.hollow = ty.hollow > 0 ? Math.max(0.3, ty.hollow + wp.hAdd + (wp.wH || 0)) : 0; w.shB = wp.shB + clamp(0.1 * (wp.mult - 1), 0, 0.6);   // onda maior já chega grande lá fora
     w.dir = ty.mode === 2 ? (ty.dir || (hash1(n + 5.5) < 0.5 ? -1 : 1)) : 0;
     w.close = ty.mode === 1 ? 1 : 0;
     // onde fica a onda: o pico numa ponta da seção (direita/esquerda abre para o outro lado) ou no meio (pico)
@@ -551,7 +580,8 @@ function updateWaves() {
     w.hw = wp.hw;
     if (ty.mode === 2) {
       // abre para o lado: o pico nasce perto de uma ponta da praia e a onda abre por quase toda a praia
-      w.x0 = -w.dir * (BH - 45) * (ty.x0Abs ? 1 : 0.9 + 0.1 * hash1(n + 13.1));
+      // o pico cai em qualquer ponto da praia (com espaço para abrir para o lado); só a Ponta nasce no promontório
+      w.x0 = -w.dir * (BH - 45) * (ty.x0Abs ? 1 : lerp(-0.35, 0.95, hash1(n + 13.1)));
       w.xc = w.x0 + w.dir * (w.hw - 20);
     } else {
       // pico / fechadeira: cobre a praia toda menos uma faixa em cada ponta; o pico cai em qualquer lugar do meio
@@ -632,9 +662,10 @@ function smin(a, b, k) { const h = clamp(0.5 + 0.5 * (b - a) / k, 0, 1); return 
 // e a altura da parede mudava de uma coluna da malha para a outra)
 function hollowAt(w, x) {
   const hl = w.mode === 2 && !(w.S > 0) ? w.hollow * smooth(-10, 0, (x - w.x0) * w.dir) : w.hollow;
-  // o ombro que só vai quebrar 25 a 55 m mais perto da areia que o pico quebra derramando (sem tubo), como numa praia
-  const zBp = w.zc + C * w.e, zBx = zBp - C * spreadAt(w, x);
-  return hl * smooth(zBp - 55, zBp - 25, zBx);
+  /* A onda continua oca enquanto abre (como num point break: a quebra corre ao longo da MESMA profundidade, porque a
+     refração entorta a onda pelo fundo). Antes o trecho que quebrava 25 a 55 m mais perto da areia que o pico virava
+     onda cheia: numa direita, ~8 s depois do pico a onda parava de formar tubo e só desmanchava em espuma. */
+  return hl;
 }
 const _wo = { h: 0, foam: 0 };
 function waveAt(x, z, out = _wo) {
@@ -643,7 +674,7 @@ function waveAt(x, z, out = _wo) {
     const w = W[i];
     const a = brokenAge(w, x), hl = hollowAt(w, x), hc = Math.min(hl, 1);
     const appr = clamp((Z0 - z) / 50, 0, 1);
-    const shoal = clamp((250 - z) / 100 + (w.shB || 0), 0, 1);
+    const shoal = clamp((Z0 - 80 - z) / 110 + (w.shB || 0), 0, 1);   // onda grande empina mais cedo (w.shB)
     let amp = (1.3 + 2.4 * shoal * shoal) * appr;
     // onda gigante: empina bem antes e desaba devagar (tudo proporcional ao tamanho). Antes ela ia de rampa de 36 m a
     // parede de 7 m em 1,6 s e de 22 m a 4 m em 3 s: a água "se deformava toda" na hora da quebra. Ondas normais (kF = 1) iguais.
@@ -661,9 +692,9 @@ function waveAt(x, z, out = _wo) {
        quebra mais tarde, mais perto da areia, então já vem mais baixo que o pico, na proporção da profundidade onde ele
        vai quebrar. Assim nenhum trecho precisa encolher antes de quebrar (antes o "limite de profundidade" encolhia
        a onda inteira a ~1,5 m/s, entre 35 e 55 m da areia, sem ela ter quebrado). */
-    const zBx = Math.max(w.zc + C * (w.e - spreadAt(w, x)), 24), zBp = w.zc + C * w.e;
-    // (suavizado para o jogo: o ombro fica com 50% a 100% do pico, para a onda render por quase toda a praia)
-    A *= clamp(Math.pow((0.85 * (zBx - SHORE) * BETA + 0.35) / (0.85 * Math.max(zBp - SHORE, 1) * BETA + 0.35), 0.6), 0.3, 1);
+    // A onda NÃO perde tamanho enquanto abre: o trecho que ainda vai quebrar tem a altura do pico até quebrar (antes
+    // ele encolhia conforme a quebra chegava mais perto da areia: 3,4 m → 1,8 m numa direita em 16 s). Só a água branca,
+    // depois de quebrar, baixa com a profundidade (Thornton & Guza, mais abaixo).
     /* Deformação antes de quebrar: nos últimos segundos a crista sobe (peaking, ~16%), fica irregular ao longo da
        onda (seções que empinam antes das outras) e se inclina para a frente, até o lábio sair. Depois tudo volta. */
     const dfm = pre * (1 - smooth(0, w.land * 0.7, a)) * hc;
@@ -740,7 +771,7 @@ uniform vec4 uE[3];
 uniform vec4 uG[3];
 const float SHORE = 12.0;
 const float GB = 0.539;
-const float Z0 = 260.0;
+const float Z0 = 350.0;
 const float BH = 420.0;
 float terrainH(vec2 p){
   float x=p.x, z=p.y;
@@ -777,10 +808,9 @@ void waveAt(vec2 p, out float h, out float foam){
     else { spread=abs(dx)/c.x; }
     float a=max(b.y-spread, b.w+0.3*sin(x*0.045+w.z*1.7));
     float hl = (b.z>1.5 && gg.y<=0.0) ? c.z*smoothstep(-10.0,0.0,dx*c.y) : c.z;
-    { float zBpH=w.x+7.5*b.y; hl*=smoothstep(zBpH-55.0,zBpH-25.0,zBpH-7.5*spread); }
     float hc=min(hl,1.0);
     float appr=clamp((Z0-z)/50.0,0.0,1.0);
-    float shoal=clamp((250.0-z)/100.0+dd.z,0.0,1.0);
+    float shoal=clamp((Z0-80.0-z)/110.0+dd.z,0.0,1.0);
     float amp=(1.3+2.4*shoal*shoal)*appr;
     float kF=max(dd.w,1.0), kB=min(kF,3.0), sk=sqrt(kF);
     float pre=smoothstep(-3.0*sk,0.0,a);
@@ -790,8 +820,6 @@ void waveAt(vec2 p, out float h, out float foam){
     float lat=0.85+0.15*sin(x*0.03+w.z);
     if(dd.x>0.0){ float q=(x-b.x)/dd.y; lat*=mix(1.0,0.45+0.75*exp(-q*q),dd.x); }
     float A=amp*w.y*lat;
-    float zBx=max(w.x+7.5*(b.y-spread),24.0), zBp=w.x+7.5*b.y;
-    A*=clamp(pow((0.85*(zBx-SHORE)*0.055+0.35)/(0.85*max(zBp-SHORE,1.0)*0.055+0.35),0.6),0.3,1.0);
     float dfm=pre*(1.0-smoothstep(0.0,w.w*0.7,a))*hc;
     A*=1.0+0.16*dfm+0.07*pre*(1.0-post)*sin(x*0.11+w.z*3.0);
     vec4 ee=uE[i];
@@ -935,7 +963,7 @@ function makeWaterMat(far) {
           vec2 r=g+o-f; float d=dot(r,r); if(d<d1){ d2=d1; d1=d; } else if(d<d2) d2=d; }
         return sqrt(d2)-sqrt(d1); }
       void main(){
-        if(uFar>0.5 && abs(vWorld.x)<BH+78.0 && vWorld.z<318.0) discard;
+        if(uFar>0.5 && abs(vWorld.x)<BH+78.0 && vWorld.z<408.0) discard;
         if(!gl_FrontFacing){
           if(uUnder<0.5) discard;
           // vista de baixo: a superfície como um teto claro e esverdeado, mais escuro com a distância
@@ -1016,12 +1044,12 @@ function makeWaterMat(far) {
   });
 }
 function makeWaterGeo(sx, sz) {
-  const g = new THREE.PlaneGeometry(2 * BH + 160, 330, Math.round(sx * 1.3), sz); g.rotateX(-Math.PI / 2); g.translate(0, 0, 155);
+  const g = new THREE.PlaneGeometry(2 * BH + 160, 330, Math.round(sx * 1.3), Math.round(sz * 1.25)); g.rotateX(-Math.PI / 2); g.translate(0, 0, 155);
   // concentra as linhas da malha na zona de arrebentação (z 15–170) para a parede do tubo ficar nítida
   const p = g.attributes.position;
   for (let i = 0; i < p.count; i++) {
     const t = (p.getZ(i) + 10) / 330;
-    const z = t < 0.2 ? -30 + t / 0.2 * 60 : t < 0.82 ? 30 + (t - 0.2) / 0.62 * 180 : 210 + (t - 0.82) / 0.18 * 110;
+    const z = t < 0.2 ? -30 + t / 0.2 * 60 : t < 0.78 ? 30 + (t - 0.2) / 0.58 * 220 : 250 + (t - 0.78) / 0.22 * 160;   // até 410 m (ondas nascem a 350 m)
     p.setZ(i, z);
   }
   return g;
@@ -1216,7 +1244,7 @@ function lipSpray(dt) {
   const ex = Math.max(1, sprayMul());
   for (let i = 0; i < 3; i++) {
     const w = W[i];
-    if (w.zc < SHORE + 4 || w.zc > 235) continue;
+    if (w.zc < SHORE + 4 || w.zc > Z0 - 15) continue;
     const pos = lips[i].geometry.attributes.position.array;
     const ld = w.land;
     // 1) vento terral arranca spray da crista antes de quebrar
@@ -1555,6 +1583,7 @@ function applyBoardLook(g, type, paint) {
   const B = boardDef(type), P = paintDef(paint), mt = g.userData.mats; if (!mt) return;
   g.userData.look = type + '|' + paint;
   g.scale.set(B.wid, B.thick || 1, B.len);
+  if (g === board && MODS.bigBoard) g.scale.multiplyScalar(1.8);   // brecha: só no seu jogo
   mt.deck.color.set(P.deck); mt.stripe.color.set(P.stripe); mt.rail.color.set(P.rail);
 }
 const curBoard = () => boardDef(CFG.board);
@@ -2064,6 +2093,7 @@ $('bTime').addEventListener('click', () => applyPreset(presetKey === 'dusk' ? 'n
 $('bSound').addEventListener('click', toggleMute);
 $('bHelp').addEventListener('click', () => { $('help').hidden = !$('help').hidden; });
 function applyWeather() {
+  if (ODD.cursed) return;
   const p = PRESETS[presetKey], c = ENV.cloud, r = ENV.rain;
   if (Math.abs(c - wxCloud) < 0.003) return; wxCloud = c;
   const g = c * 0.75;
@@ -2240,6 +2270,7 @@ function endRide(reason) {
 }
 // kind: 'lip' (o lábio caiu em cima), 'close' (tubo/onda fechou), 'foam' (espuma), 'rail' (rabeta), 'nose' (bico enterrou), 'air'
 function wipeout(msg, kind = 'lip') {
+  if (MODS.noWipe) { if (S.mode === 'air') { S.mode = 'ride'; S.vy = 0; } return; }   // brecha: nunca toma vaca
   endRide('wipe');
   const fromAir = S.mode === 'air';
   const vx = S.vx || 0, vz = S.vz || 0, vy = fromAir ? S.vy : 0;
@@ -2355,7 +2386,7 @@ function stepSkim(dt, ax, ay, jump, act, tgt) {
     sp *= 1 - Math.min(Math.abs(diff) * 0.35 * dt, 0.5);
     S.vx = Math.sin(nAng) * sp; S.vz = Math.cos(nAng) * sp;
     if (Math.abs(ax) < 0.1 && sp > 0.5) S.heading += angDiff(nAng, S.heading) * (1 - Math.exp(-3 * dt));
-    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 230);
+    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, Z0 - 20);
     const y = skimH(S.pos.x, S.pos.z);
     rig.position.set(S.pos.x, y + 0.03, S.pos.z);
     // prancha deitada na superfície e inclinada na curva
@@ -2418,7 +2449,7 @@ function stepSkim(dt, ax, ay, jump, act, tgt) {
     }
   } else {
     // no ar
-    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 230);
+    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, Z0 - 20);
     k.vy -= 19 * dt; k.y += k.vy * dt; k.spin += -ax * 8 * dt;
     if (r) r.pts += dt * 20;
     rig.position.set(S.pos.x, k.y, S.pos.z);
@@ -2514,6 +2545,7 @@ function runFrame(dt) {
   updateAudio(dt);
   updateMist(dt);
   updateNet(dt);
+  oddUpdate(dt);
   shakeT = Math.max(0, shakeT - dt * 1.4);
   if (window.__mareCam) { const c = window.__mareCam; camera.position.set(c.p[0], c.p[1], c.p[2]); camera.lookAt(c.t[0], c.t[1], c.t[2]); }
   renderFrame(dt);
@@ -2546,7 +2578,10 @@ function step(dt) {
   if (take('KeyP') && !$('bMp').hidden) mpOpen();
   if (take('KeyB')) boardOpen();
   if (take('KeyF')) goFullscreen(!document.fullscreenElement);
-  if (take('Escape')) { openSettings(false); mpOpen(false); boardOpen(false); menuOpen(false); }
+  if (take('Escape')) { openSettings(false); mpOpen(false); boardOpen(false); menuOpen(false); modsOpen(false); }
+  if (take('Enter') || take('NumpadEnter')) chatOpen();
+  if (take('F8')) modsOpen();
+  voiceTalk(!!keys.KeyV);
   if (S.mode !== 'ride') S.tubeCam = lerp(S.tubeCam || 0, 0, 1 - Math.exp(-3 * dt));
   if (lastCrash > 0.6) shakeT = Math.max(shakeT, clamp(lastCrash - 0.6, 0, 1) * 0.3);
   const ax = axisX(), ay = axisY();
@@ -2566,15 +2601,16 @@ function step(dt) {
     if (depth > 0.15) spd *= clamp(1 - depth * 0.55, 0.35, 1);
     if (S.hasBoard) spd *= 0.85;
     spd *= 1 - 0.55 * cr;                                     // agachado anda devagar
+    spd *= MODS.speed;
     const k = 1 - Math.exp(-10 * dt);
     S.vx = lerp(S.vx, mx * spd, k); S.vz = lerp(S.vz, mz * spd, k);
-    let nx = clamp(S.pos.x + S.vx * dt, -BH, BH), nz = clamp(S.pos.z + S.vz * dt, -95, 230);
+    let nx = clamp(S.pos.x + S.vx * dt, -BH, BH), nz = clamp(S.pos.z + S.vz * dt, -95, Z0 - 20);
     const nd = waterH(nx, nz) - terrainH(nx, nz);
-    if (!S.hasBoard && nd > 1.15 && nz > S.pos.z) { nz = S.pos.z; nx = S.pos.x; }
+    if (!S.hasBoard && !MODS.waterWalk && nd > 1.15 && nz > S.pos.z) { nz = S.pos.z; nx = S.pos.x; }
     S.pos.x = nx; S.pos.z = nz;
     const sp = Math.hypot(S.vx, S.vz);
     if (sp > 0.3) S.facing += angDiff(Math.atan2(S.vx, S.vz), S.facing) * (1 - Math.exp(-10 * dt));
-    const g2 = terrainH(S.pos.x, S.pos.z);
+    const g2 = MODS.waterWalk ? Math.max(terrainH(S.pos.x, S.pos.z), waterH(S.pos.x, S.pos.z)) : terrainH(S.pos.x, S.pos.z);
     // skim: com a prancha, correndo na areia molhada, ESPAÇO joga a prancha na lâmina d'água e você sobe nela
     const wetHere = depth > 0.004 ? 1 : sandWet(S.pos.x, S.pos.z);
     let skimGo = false;
@@ -2583,7 +2619,7 @@ function step(dt) {
       else pop('Areia seca', 'o skim só desliza na areia molhada, perto da água');
     }
     if (jump && S.grounded && !skimGo) { S.vy = 5.2; S.grounded = false; }
-    S.vy -= 16 * dt; S.y += S.vy * dt;
+    S.vy -= 16 * (MODS.lowGrav ? 0.3 : 1) * dt; S.y += S.vy * dt;
     if (S.y <= g2) { S.y = g2; S.vy = 0; S.grounded = true; }
     hero.position.set(S.pos.x, S.y, S.pos.z); hero.rotation.set(0, S.facing, 0);
     if (depth > 0.15 && sp > 1 && Math.random() < dt * 20 * Math.min(depth, 1)) emit(S.pos.x, wh, S.pos.z, S.vx * 0.3, 1.2, S.vz * 0.3, 2, 0.6);
@@ -2617,7 +2653,7 @@ function step(dt) {
       if (act && depth < 0.1) { S.hasBoard = false; boardToSand(S.pos.x + Math.cos(S.facing) * 1.2, S.pos.z - Math.sin(S.facing) * 1.2, S.facing); enterWalk(); }
       // só deita na prancha quando VOCÊ entra no mar (andando para o fundo) ou onde não dá mais pé. Antes bastava a água
       // passar de 0,8 m: a espuma e a língua d'água subindo a areia te deitavam e levantavam sozinho a cada onda
-      if (depth > 1.3 || (depth > 0.8 && ay > 0.3 && S.vz > 0.4)) enterPaddle(true);
+      if (!MODS.waterWalk && (depth > 1.3 || (depth > 0.8 && ay > 0.3 && S.vz > 0.4))) enterPaddle(true);
     }
     setMode(depth > 0.15 ? 'Na água' : 'Na areia', '');
     if (LEVEL - TIDE < -0.2 && S.pos.z > -5) hud.wave.textContent = 'A água está recuando: vem série forte';
@@ -2650,8 +2686,8 @@ function step(dt) {
     }
     S.heading += -ax * 1.9 * dt * (d ? 0.35 : 1);
     const BD = curBoard();
-    if (!d) { if (ay > 0) S.speed += 3.2 * BD.paddle * ay * dt; else if (ay < 0) S.speed += 2.5 * ay * dt; }
-    S.speed -= S.speed * (d ? 0.3 : 0.75) * dt; S.speed = clamp(S.speed, -1, 5.4 * BD.paddle);
+    if (!d) { if (ay > 0) S.speed += 3.2 * BD.paddle * MODS.speed * ay * dt; else if (ay < 0) S.speed += 2.5 * ay * dt; }
+    S.speed -= S.speed * (d ? 0.3 : 0.75) * dt; S.speed = clamp(S.speed, -1, 5.4 * BD.paddle * MODS.speed);
     const g = grad(S.pos.x, S.pos.z); const fo = waveAt(S.pos.x, S.pos.z).foam;
     const shield = 1 - 0.85 * prot;
     S.wx += -g.gx * 7 * dt * shield; S.wz += (-g.gz * 7 - fo * 8) * dt * shield;
@@ -2659,7 +2695,7 @@ function step(dt) {
     if (d && prot > 0.5) d.absorbed = Math.max(d.absorbed, fo + Math.max(0, g.gz));    // o que passou por cima
     const fx = Math.sin(S.heading), fz = Math.cos(S.heading);
     S.vx = fx * S.speed + S.wx; S.vz = fz * S.speed + S.wz;
-    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 235);
+    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, Z0 - 20);
     const h = waterH(S.pos.x, S.pos.z); const depth = h - terrainH(S.pos.x, S.pos.z);
     rig.position.set(S.pos.x, h + 0.04 - dd, S.pos.z);
     orientRig(S.pos.x, S.pos.z, S.heading, Math.sin(clock * 1.7) * 0.04, 1 - Math.exp(-8 * dt), dd > 0.3 ? 0.6 : 0, pitch);
@@ -2784,10 +2820,10 @@ function step(dt) {
     if (fFace < 0.35 && tr > 1.1 && sp > 6.5 && gl > 0.1) sp += 0.9 * tr * dt;
     // atrito; S estola (segura no tubo); embaixo e sem parede a prancha morre
     sp -= (0.17 * sp + 0.009 * sp * sp + (ay < 0 ? 5.5 : 0) + (fFace < 0.12 && gl < 0.06 ? 1.6 : 0)) * dt;
-    sp = clamp(sp, 0, BR.vmax);
+    sp = clamp(sp, 0, BR.vmax * MODS.speed);
     S.vx = Math.sin(nAng) * sp; S.vz = Math.cos(nAng) * sp;
     if (Math.abs(ax) < 0.1) S.heading += angDiff(nAng, S.heading) * (1 - Math.exp(-2 * dt));
-    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 235);
+    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, Z0 - 20);
     const h = waterH(S.pos.x, S.pos.z); const depth = h - terrainH(S.pos.x, S.pos.z);
     const climb = (S.vx * g.gx + S.vz * g.gz);
     rig.position.set(S.pos.x, h + 0.04, S.pos.z);
@@ -2937,8 +2973,8 @@ function step(dt) {
   }
 
   else if (S.mode === 'air') {
-    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, 235);
-    S.vy -= 19 * dt; S.y += S.vy * dt;
+    S.pos.x = clamp(S.pos.x + S.vx * dt, -BH, BH); S.pos.z = clamp(S.pos.z + S.vz * dt, -95, Z0 - 20);
+    S.vy -= 19 * (MODS.lowGrav ? 0.3 : 1) * dt; S.y += S.vy * dt;
     S.spin += -ax * 7.5 * dt;
     if (S.ride) S.ride.pts += dt * 30;
     rig.position.set(S.pos.x, S.y, S.pos.z);
@@ -3172,7 +3208,7 @@ function renderFrame(dt) {
   u.uSun.value.set(_sv.x * 0.5 + 0.5, _sv.y * 0.5 + 0.5);
   u.uSunVis.value = (inFront ? (1 - smooth(1.0, 1.6, edge)) * smooth(-0.02, 0.06, skyU.uSunDir.value.y) : 0) * (1 - 0.85 * ENV.cloud);
   u.uTint.value.copy(skyU.uSunColor.value);
-  u.uFlare.value = CFG.flare ? (presetKey === 'dusk' ? 1 : 0.6) : 0;
+  u.uFlare.value = CFG.flare && !ODD.cursed ? (presetKey === 'dusk' ? 1 : 0.6) : 0;
   u.uRays.value = CFG.rays && CFG.quality !== 'medio' ? 1 : 0;
   u.uGrain.value = CFG.grain ? 1 : 0;
   dropsT = Math.max(0, dropsT - dt * 0.35);
@@ -3255,7 +3291,7 @@ function applyQuality() {
 function waveLabel() {
   // altura que a onda tem DE VERDADE ao quebrar: a que quebra muito longe ainda não empinou tudo (mesma conta do waveAt)
   const c = waveCfg(), B = BEACHES[c.beach] || BEACHES.farol, mult = Math.min(c.ws, B.max) * B.mult;
-  const real = m => { const zb = clamp(110 + 22 * m + B.zAdd, 85, B.zMax), sh = clamp((250 - zb) / 100 + B.shB, 0, 1); return 3.7 * m * (1.3 + 2.4 * sh * sh) / 3.7 * Math.min(1, (Z0 - zb) / 50); };
+  const real = m => { const zb = clamp(125 + 28 * m + B.zAdd, 90, B.zMax), sh = clamp((Z0 - 80 - zb) / 110 + B.shB + clamp(0.1 * (m - 1), 0, 0.6), 0, 1); return 3.7 * m * (1.3 + 2.4 * sh * sh) / 3.7 * Math.min(1, (Z0 - zb) / 50); };
   const f = v => v.toFixed(1).replace('.', ',');
   return B.name + ' · ≈ ' + f(real(mult)) + ' m · séries até ' + f(real(mult * 1.66)) + ' m';
 }
@@ -3328,7 +3364,7 @@ $('go').addEventListener('click', () => {
   camera.position.set(0, 3.5, -30);
   enterWalk();
   setHint('Sua prancha está na areia, marcada pela seta amarela');
-  if (MP.prefill && !$('bMp').hidden) mpOpen(true);
+  if ((MP.prefill || MP.prefillPub) && !$('bMp').hidden) mpOpen(true);
   canvas.focus && canvas.focus();
 });
 /* ---------- Multiplayer online ----------
@@ -3338,13 +3374,14 @@ $('go').addEventListener('click', () => {
    O MAR É O MESMO PARA TODOS sem mandar uma onda sequer pela rede: as ondas já são uma conta que só depende do
    tempo T e do número n de cada onda. Então basta todos usarem o mesmo relógio (o do anfitrião, corrigido aos
    poucos) e as mesmas regras de ondas (tamanho e tipos do anfitrião, que é quem entrou primeiro). */
-const SEA_PERIOD = 13 * 420 * 16;          // múltiplo do período das ondas (13 s) e da maré (420 s): ~24 h
+const SEA_PERIOD = P * 420 * 16;           // múltiplo do período das ondas e da maré (420 s): ~30 h
 let tShift = 0;                            // só para testes
-const NET = { room: null, user: null, on: false, joinedAt: Date.now(), clockOff: 0, offSamples: [], hostPeer: null, hostCfg: null,
+const NET = { muted: new Set(), chat: null, room: null, user: null, on: false, joinedAt: Date.now(), clockOff: 0, offSamples: [], hostPeer: null, hostCfg: null,
   avatars: new Map(), lastSend: 0, ev: null, evN: 0, names: {}, seenEv: {}, isHost: true, count: 1 };
 function seaTime() { return ((((Date.now() + NET.clockOff) / 1000 + tShift) % SEA_PERIOD) + SEA_PERIOD) % SEA_PERIOD; }
 function waveCfg() {
-  if (!NET.isHost && NET.hostCfg) return NET.hostCfg;
+  if (ODD.cursed) return ODD.cfg || (ODD.cfg = { ws: 0.5, types: Object.fromEntries(TYPE_KEYS.map(k => [k, k === 'cheia'])), beach: 'baia' });
+  if (!NET.isHost && NET.hostCfg && !MODS.ownWaves) return NET.hostCfg;
   return { ws: CFG.waveSize, types: CFG.types, beach: CFG.beach };
 }
 const PEER_COLS = [[0x2fd0bc, 0xfdf6e8], [0x3d6fb6, 0xffd166], [0xe8506e, 0xfdf6e8], [0x8a5cf6, 0x2fd0bc], [0xffd166, 0x23394a], [0x3fa34d, 0xffd166], [0xff9f1c, 0x23394a], [0x2b2d42, 0xff7a59]];
@@ -3396,7 +3433,7 @@ function netSend() {
     vx: r2(S.vx || 0), vz: r2(S.vz || 0),
     sc: [Math.round(S.total), Math.round(S.best), Math.round(S.ride ? S.ride.pts : 0)],
     cfg: { ws: CFG.waveSize, bc: CFG.beach, ty: TYPE_KEYS.filter(k => CFG.types[k]).join(',') },
-    ev: NET.ev
+    ev: NET.ev, cm: NET.chat, vo: VOICE.on ? 1 : 0, tk: VOICE.talking ? 1 : 0, md: modsOn() ? 1 : 0
   };
   NET.room.presence(pr).catch(() => { });
 }
@@ -3404,11 +3441,11 @@ function netSend() {
 function netEvent(text, sub, bad) {
   NET.evN++; NET.ev = { i: NET.evN, t: String(text).slice(0, 40), s: String(sub || '').slice(0, 60), b: !!bad };
 }
-function feed(html) {
+function feed(html, chat) {
   const box = $('feed'); if (!box) return;
-  const d = document.createElement('div'); d.className = 'fd'; d.textContent = html;
-  box.appendChild(d); setTimeout(() => d.remove(), 6000);
-  while (box.children.length > 4) box.firstChild.remove();
+  const d = document.createElement('div'); d.className = 'fd' + (chat ? ' chat' : ''); d.textContent = html;
+  box.appendChild(d); setTimeout(() => d.remove(), chat ? 10000 : 6000);
+  while (box.children.length > 6) box.firstChild.remove();
 }
 async function resolveNames(peers) {
   if (!NET.user || !NET.user.profiles) return;
@@ -3436,10 +3473,14 @@ function onRoomPeers(ch) {
     const pr = p.presence; if (!pr || pr.v !== 1 || !Array.isArray(pr.hp)) continue;
     const av = NET.avatars.get(p.peer) || makeAvatar(p.peer);
     av.tgt = pr; av.seen = performance.now(); av.name = peerName(p);
-    if (pr.ev && typeof pr.ev.i === 'number' && NET.seenEv[p.peer] !== pr.ev.i) {
-      const first = NET.seenEv[p.peer] === undefined; NET.seenEv[p.peer] = pr.ev.i;
-      if (!first) feed(av.name + ': ' + pr.ev.t + (pr.ev.s ? ' · ' + pr.ev.s : ''));
-    }
+    // avisos e chat: o que já estava na presença quando você viu a pessoa pela primeira vez não repete; tudo que vier
+    // depois aparece (antes a PRIMEIRA mensagem e a primeira manobra de cada um eram puladas)
+    const ei = pr.ev && typeof pr.ev.i === 'number' ? pr.ev.i : 0;
+    if (NET.seenEv[p.peer] === undefined) NET.seenEv[p.peer] = ei;
+    else if (ei !== NET.seenEv[p.peer]) { NET.seenEv[p.peer] = ei; if (pr.ev) feed(av.name + ': ' + cleanMsg(pr.ev.t) + (pr.ev.s ? ' · ' + cleanMsg(pr.ev.s) : '')); }
+    const ci = pr.cm && typeof pr.cm.i === 'number' ? pr.cm.i : 0;
+    if (CHAT.seen[p.peer] === undefined) CHAT.seen[p.peer] = ci;
+    else if (ci !== CHAT.seen[p.peer]) { CHAT.seen[p.peer] = ci; const t = cleanMsg(pr.cm && pr.cm.t); if (t && !NET.muted.has(p.peer)) feed(av.name + ': ' + t, true); }
     // relógio do mar: amostra do anfitrião (o atraso da rede só faz subestimar, então vale a maior das amostras recentes)
     // só vale uma mensagem NOVA do anfitrião (está em ch.updated): a cópia guardada que chega quando você entra
     // pode ser de segundos atrás (aba dele parada) e atrasaria o mar
@@ -3467,6 +3508,7 @@ function onRoomPeers(ch) {
   }
   for (const p of ch.left) { dropAvatar(p.peer); delete NET.seenEv[p.peer]; }
   if (NET.isHost) { NET.offSamples.length = 0; }
+  if (MP.kind === 'peer') voiceSync();
   renderPlayers(peers);
 }
 const VWARNED = {};
@@ -3495,19 +3537,20 @@ function drawPlayers(peers) {
     const me = p.isMe && p.sameTab;
     return { name: me ? 'Você' : peerName(p), total: me ? S.total : (+sc[0] || 0), mode: me ? S.mode : pr.m, me, host: p.peer === NET.hostPeer };
   }).sort((a, b) => b.total - a.total).slice(0, 8);
+  if (ODD.ghostUntil > performance.now() && rows.length >= 2) rows.push({ name: 'Surfista 0', total: 0, mode: '_g', me: false, host: false });
   box.hidden = rows.length < 2;
-  if (NET.on) setNet((NET.via === 'peer' && MP.code ? 'Sala ' + MP.code : 'Online') + ' · ' + rows.length + (rows.length === 1 ? ' surfista na praia' : ' surfistas na praia'), 'on');
-  if (NET.via === 'peer' && !$('mp').hidden && MP.state === 'in') mpRender();
+  if (NET.on) setNet((NET.via === 'peer' && MP.code ? (MP.kind === 'pub' ? 'Sala pública ' : 'Sala ') + MP.code : 'Online') + ' · ' + rows.length + (rows.length === 1 ? ' surfista na praia' : ' surfistas na praia'), 'on');
+  if (!$('mp').hidden && (MP.state === 'in' || NET.via === 'claude')) mpRender();
   box.textContent = '';
   const h = document.createElement('div'); h.className = 'ph'; h.textContent = 'Na praia agora · ' + rows.length; box.appendChild(h);
   for (const r of rows) {
     const d = document.createElement('div'); d.className = 'pr' + (r.me ? ' me' : '');
     const n = document.createElement('span'); n.textContent = (r.host ? '★ ' : '') + r.name; d.appendChild(n);
-    const m = document.createElement('span'); m.className = 'pm'; m.textContent = (MODE_TXT[r.mode] || '') + ' · ' + fmt(r.total); d.appendChild(m);
+    const m = document.createElement('span'); m.className = 'pm'; m.textContent = (r.mode === '_g' ? 'afogado' : MODE_TXT[r.mode] || '') + ' · ' + fmt(r.total); d.appendChild(m);
     box.appendChild(d);
   }
 }
-const _aq = new THREE.Quaternion(), _ap = new V3();
+const _aq = new THREE.Quaternion(), _ap = new V3(), _ap2 = new V3();
 function updateNet(dt) {
   if (!NET.room) return;
   // corrige o relógio devagar (no máximo 60 ms por segundo) para o mar nunca pular; diferença grande só na entrada
@@ -3538,7 +3581,8 @@ function updateNet(dt) {
     // nome em cima da cabeça, com o que a pessoa está fazendo
     av.J.head.getWorldPosition(_ap);
     av.tag.position.set(_ap.x, Math.max(_ap.y, waterH(_ap.x, _ap.z)) + 0.75, _ap.z);
-    const sub = t.m === 'ride' || t.m === 'air' ? (MODE_TXT[t.m] + (Array.isArray(t.sc) && t.sc[2] ? ' · ' + fmt(t.sc[2]) : '')) : (MODE_TXT[t.m] || '');
+    const sub = (t.m === 'ride' || t.m === 'air' ? (MODE_TXT[t.m] + (Array.isArray(t.sc) && t.sc[2] ? ' · ' + fmt(t.sc[2]) : '')) : (MODE_TXT[t.m] || '')) + (t.tk ? ' · falando' : '') + (t.md ? ' · mod' : '');
+    const au = VOICE.audios.get(peer); if (au) { au.muted = NET.muted.has(peer); au.volume = clamp(1.2 - av.h.position.distanceTo(hero.getWorldPosition(_ap2)) / 70, 0.12, 1); }
     if (av.name + sub !== av.drawn) { av.drawn = av.name + sub; av.tag.userData.draw(av.name, sub); }
     const d = camera.position.distanceTo(av.tag.position);
     av.tag.scale.set(1.6 * clamp(d / 12, 0.7, 4), 0.4 * clamp(d / 12, 0.7, 4), 1);
@@ -3557,11 +3601,13 @@ async function netConnect() {
     setNet('Conectando ao multiplayer…', '');
     let room = null;
     try { room = await window.claude.use('room'); } catch (e) { room = null; }
-    if (room) { try { NET.user = await window.claude.use('user'); } catch (e) { NET.user = null; } attachRoom(room, true); return; }
+    if (room) { try { NET.user = await window.claude.use('user'); } catch (e) { NET.user = null; } attachRoom(room, true); $('bMp').hidden = false; MP.kind = 'claude'; return; }
   }
   // sem a sala do claude.ai (site do GitHub, .exe, arquivo salvo): multiplayer por código de sala
   $('bMp').hidden = false;
   setNet('Um jogador · Multiplayer (P) para jogar com amigos', 'off');
+  const qp = new URLSearchParams(location.search).get('publica');
+  if (qp) { MP.prefillPub = qp.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); MP.status = 'Você recebeu um convite para uma sala pública: escolha seu nome e clique em Entrar.'; MP.prefill = ''; }
   const q = new URLSearchParams(location.search).get('sala');
   if (q) { MP.prefill = q.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6); MP.status = 'Você recebeu um convite: escolha seu nome e clique em Entrar.'; }
 }
@@ -3658,7 +3704,325 @@ function makePeerRoom(peer, isHost, code, onEnd) {
   peer.on('disconnected', () => { if (!dead) { try { peer.reconnect(); } catch (e) { } } });
   return room;
 }
-const MP = { state: 'idle', status: '', code: '', peer: null };
+const MP = { state: 'idle', status: '', code: '', peer: null, kind: null, list: null };
+/* ---------- Salas públicas (servidor de mensagens) ----------
+   Como no Gorilla Tag: qualquer um entra numa sala aberta. O estado de cada surfista e o chat passam por um
+   servidor público de mensagens (MQTT: HiveMQ; reserva: Mosquitto). Os jogadores só falam com o servidor, nunca
+   entre si, então ninguém vê o IP de ninguém. A segurança é fraca de propósito: o código da sala aparece na lista
+   de salas abertas e qualquer um que souber entra e escuta. Por isso nada pessoal viaja: só apelido, posição,
+   placar e chat, e cada página confere o que recebe (tamanho, números, texto puro). */
+const MQTT_SRC = ['js/mqtt.min.js', 'https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js'];
+const MQTT_BROKERS = ['wss://broker.hivemq.com:8884/mqtt', 'wss://test.mosquitto.org:8081/mqtt'];
+const MQ_BASE = 'maredourada/v2/', MQ_MAX = 10;
+const mqId = () => 'u' + Math.random().toString(36).slice(2, 11);
+const pubCode = () => 'P' + Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[(Math.random() * 32) | 0]).join('');
+async function loadMqtt() {
+  for (const src of MQTT_SRC) { if (window.mqtt) break; try { await loadScript(src); } catch (e) { } }
+  return !!(window.mqtt && window.mqtt.connect);
+}
+// conecta no primeiro servidor que responder (8 s cada). will = tópico que o servidor limpa se a conexão cair
+async function mqOpen(will) {
+  for (const url of MQTT_BROKERS) {
+    const c = await new Promise(res => {
+      let settled = false;
+      const opts = { connectTimeout: 7000, reconnectPeriod: 0, clean: true, clientId: 'md_' + Math.random().toString(36).slice(2, 12) };
+      if (will) opts.will = { topic: will, payload: '', qos: 0, retain: true };
+      let cl; try { cl = mqtt.connect(url, opts); } catch (e) { return res(null); }
+      const t = setTimeout(() => { if (!settled) { settled = true; try { cl.end(true); } catch (e) { } res(null); } }, 8000);
+      cl.once('connect', () => { if (settled) return; settled = true; clearTimeout(t); res(cl); });
+      cl.once('error', () => { if (settled) return; settled = true; clearTimeout(t); try { cl.end(true); } catch (e) { } res(null); });
+    });
+    if (c) { c.options.reconnectPeriod = 3000; return c; }
+  }
+  return null;
+}
+// lista de salas abertas: cada sala se anuncia a cada 5 s; vale o anúncio dos últimos 25 s
+async function mqList() {
+  const cl = await mqOpen(null); if (!cl) return [];
+  const rooms = {};
+  await new Promise(res => {
+    cl.on('message', (t, b) => { const code = t.split('/').pop(); try { const j = JSON.parse(b.toString()); if (j && typeof j.n === 'number' && typeof j.t === 'number') rooms[code] = j; } catch (e) { } });
+    cl.subscribe(MQ_BASE + 'lobby/+'); setTimeout(res, 2500);
+  });
+  try { cl.end(true); } catch (e) { }
+  const now = Date.now();
+  return Object.entries(rooms).filter(([c, j]) => /^[A-Z0-9]{3,8}$/.test(c) && Math.abs(now - j.t) < 25000 && j.n > 0)
+    .map(([code, j]) => ({ code, n: Math.min(Math.round(j.n), 99), v: String(j.v || '').slice(0, 12) })).sort((a, b) => b.n - a.n).slice(0, 12);
+}
+function makeMqttRoom(cl, code, me, onEnd) {
+  const base = MQ_BASE + 's/' + code + '/p/', lobbyT = MQ_BASE + 'lobby/' + code;
+  const map = new Map(), seenAt = new Map(), hs = [], cs = [];
+  let myPres = {}, dead = false, connected = true, pend = { j: [], l: [], u: [] }, sched = false, lastPub = 0, pubT = 0;
+  const mk = (id, pres) => Object.freeze({ peer: id, by: null, isMe: id === me, sameTab: id === me, kind: 'viewer', guest: false, presence: Object.freeze(pres || {}), updatedAt: Date.now() });
+  const flush = () => { sched = false; const ch = { peers: Object.freeze([...map.values()]), joined: pend.j, left: pend.l, updated: pend.u }; pend = { j: [], l: [], u: [] }; for (const h of hs) { try { h(ch); } catch (e) { console.error(e); } } };
+  const queue = (k, p) => { pend[k].push(p); if (!sched) { sched = true; setTimeout(flush, 0); } };
+  const setPeer = (id, pres) => { const had = map.has(id); const p = mk(id, pres); map.set(id, p); queue(had ? 'u' : 'j', p); };
+  const delPeer = id => { const p = map.get(id); if (!p) return; map.delete(id); seenAt.delete(id); queue('l', p); };
+  const setConn = c => { if (c === connected) return; connected = c; for (const h of cs) h(c); };
+  const okPres = p => p && typeof p === 'object' && !Array.isArray(p);
+  map.set(me, mk(me, {}));
+  cl.on('message', (topic, buf) => {
+    if (dead || !topic.startsWith(base)) return;
+    const id = topic.slice(base.length);
+    if (!/^[a-z0-9_]{4,24}$/.test(id) || id === me) return;
+    if (!buf || !buf.length) return delPeer(id);               // saiu (ou o servidor limpou ao cair)
+    if (buf.length > 4096) return;                              // mesmo limite da sala do claude.ai
+    let pr; try { pr = JSON.parse(buf.toString()); } catch (e) { return; }
+    if (!okPres(pr)) return;
+    seenAt.set(id, performance.now()); setPeer(id, pr);
+  });
+  cl.subscribe(base + '+', { qos: 0 });
+  cl.on('connect', () => { setConn(true); cl.subscribe(base + '+', { qos: 0 }); });
+  cl.on('close', () => setConn(false)); cl.on('offline', () => setConn(false));
+  // quem sumiu sem avisar: 10 s sem notícia = saiu
+  const sweep = setInterval(() => { const now = performance.now(); for (const [id, t] of seenAt) if (now - t > 10000) delPeer(id); }, 2000);
+  const announce = () => { if (!dead && connected) cl.publish(lobbyT, JSON.stringify({ n: map.size, t: Date.now(), v: GAME_VERSION }), { qos: 0, retain: true }); };
+  const lobbyI = setInterval(announce, 5000); setTimeout(announce, 600);
+  // no máximo 10 mensagens por segundo (servidor público)
+  const pub = () => { pubT = 0; lastPub = performance.now(); if (!dead && connected) cl.publish(base + me, JSON.stringify(myPres), { qos: 0, retain: true }); };
+  const room = {
+    code,
+    presence(patch) {
+      if (dead) return Promise.resolve();
+      myPres = Object.assign({}, myPres, patch); for (const k in patch) if (patch[k] === null) delete myPres[k];
+      setPeer(me, myPres);
+      const wait = 100 - (performance.now() - lastPub);
+      if (wait <= 0) pub(); else if (!pubT) pubT = setTimeout(pub, wait);
+      return Promise.resolve();
+    },
+    onPeers(h) { hs.push(h); setTimeout(() => { const all = Object.freeze([...map.values()]); h({ peers: all, joined: all, left: [], updated: [] }); }, 0); return () => { const i = hs.indexOf(h); if (i >= 0) hs.splice(i, 1); }; },
+    onConnection(h) { cs.push(h); setTimeout(() => h(connected), 0); return () => { const i = cs.indexOf(h); if (i >= 0) cs.splice(i, 1); }; },
+    connected: () => connected,
+    peers: () => Object.freeze([...map.values()]),
+    count: () => map.size,
+    leave(msg) {
+      if (dead) return; dead = true;
+      clearInterval(sweep); clearInterval(lobbyI); clearTimeout(pubT);
+      try { cl.publish(base + me, '', { qos: 0, retain: true }); if (map.size <= 1) cl.publish(lobbyT, '', { qos: 0, retain: true }); } catch (e) { }
+      for (const id of [...map.keys()]) if (id !== me) delPeer(id);
+      setConn(false);
+      setTimeout(() => { try { cl.end(); } catch (e) { } }, 400);
+      onEnd(msg || '');
+    }
+  };
+  return room;
+}
+async function mpPublic(code) {
+  if (MP.state !== 'idle') return;
+  const nick = cleanNick(($('mpName') || {}).value) || NET.nick || 'Surfista';
+  try { localStorage.setItem('mare-dourada-nome', nick); } catch (e) { }
+  NET.nick = nick;
+  MP.state = 'connecting'; MP.status = 'Carregando as salas públicas…'; mpRender();
+  if (!(await loadMqtt())) { MP.state = 'idle'; MP.status = 'Não foi possível carregar as salas públicas. Confira a internet.'; return mpRender(); }
+  code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  if (code.length < 3) {
+    MP.status = 'Procurando uma sala aberta…'; mpRender();
+    const list = await mqList(); MP.list = list;
+    const open = list.find(r => r.n < MQ_MAX && r.v === GAME_VERSION) || list.find(r => r.n < MQ_MAX);
+    code = open ? open.code : pubCode();
+  }
+  const me = mqId();
+  MP.status = 'Entrando na sala pública ' + code + '…'; mpRender();
+  const cl = await mqOpen(MQ_BASE + 's/' + code + '/p/' + me);
+  if (!cl) { MP.state = 'idle'; MP.status = 'O servidor de salas públicas não respondeu (8 s). Tente de novo.'; return mpRender(); }
+  NET.joinedAt = Date.now();
+  const room = makeMqttRoom(cl, code, me, mpEnded);
+  MP.room = room; MP.code = code; MP.kind = 'pub'; MP.state = 'in'; MP.status = '';
+  attachRoom(room, false);
+  oddRoom(code);
+  mpRender();
+}
+async function mpBrowse() {
+  MP.status = 'Procurando salas abertas…'; mpRender();
+  if (!(await loadMqtt())) { MP.status = 'Não foi possível carregar as salas públicas.'; return mpRender(); }
+  MP.list = await mqList();
+  MP.status = MP.list.length ? '' : 'Nenhuma sala aberta agora. Clique em "Entrar numa sala pública" para abrir uma.';
+  mpRender();
+}
+
+/* ---------- Chat de texto ----------
+   Enter abre, Enter manda, Esc fecha. A mensagem vai na presença (todo mundo na sala pode mandar, inclusive na sala
+   do claude.ai), no máximo 120 letras e uma a cada 1,2 s. Quem recebe mostra como texto puro, nunca como HTML. */
+const cleanMsg = t => String(t || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
+function chatOpen() {
+  if (!NET.room) return;
+  $('chatBox').hidden = false; const i = $('chatIn'); i.value = ''; i.focus();
+  if (document.pointerLockElement) document.exitPointerLock();
+  for (const k in keys) keys[k] = false;
+}
+function chatClose() { $('chatBox').hidden = true; $('chatIn').blur(); }
+function chatSend(t) {
+  t = cleanMsg(t); if (!t || !NET.room) return;
+  const now = performance.now();
+  if (now - CHAT.last < 1200) { feed('Espere um pouco para mandar outra mensagem.'); return; }
+  CHAT.last = now; CHAT.n++; NET.chat = { i: CHAT.n, t };
+  feed('Você: ' + t, true); netSend();
+}
+$('modClose').addEventListener('click', () => modsOpen(false));
+$('chatIn').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); chatSend($('chatIn').value); chatClose(); }
+  else if (e.key === 'Escape') { e.preventDefault(); chatClose(); }
+  e.stopPropagation();
+});
+
+/* ---------- Chat de voz (só nas salas com código, entre amigos) ----------
+   Liga no Multiplayer; segure V para falar. A voz vai direto entre os aparelhos (PeerJS), então os amigos da sala
+   veem o IP uns dos outros: por isso não existe voz nas salas públicas. O volume cai com a distância na praia. */
+async function voiceToggle() {
+  if (VOICE.on) return voiceOff();
+  if (!(MP.kind === 'peer' && MP.peer)) { MP.status = 'Voz só nas salas com amigos (código).'; return mpRender(); }
+  try { VOICE.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+  catch (e) { MP.status = 'O microfone não foi liberado.'; return mpRender(); }
+  VOICE.stream.getAudioTracks().forEach(t => { t.enabled = false; });   // só fala segurando V
+  VOICE.on = true; MP.status = 'Voz ligada: segure V para falar.'; voiceSync(); mpRender();
+}
+function voiceOff() {
+  VOICE.on = false; VOICE.talking = false;
+  for (const c of VOICE.calls.values()) { try { c.close(); } catch (e) { } }
+  VOICE.calls.clear();
+  for (const a of VOICE.audios.values()) { a.srcObject = null; a.remove(); }
+  VOICE.audios.clear();
+  if (VOICE.stream) VOICE.stream.getTracks().forEach(t => t.stop());
+  VOICE.stream = null;
+  if ($('mp') && !$('mp').hidden) mpRender();
+}
+function voiceTalk(on) {
+  if (!VOICE.on || !VOICE.stream || VOICE.talking === on) return;
+  VOICE.talking = on; VOICE.stream.getAudioTracks().forEach(t => { t.enabled = on; });
+}
+function voiceAttach(call) {
+  VOICE.calls.set(call.peer, call);
+  call.on('stream', s => {
+    let a = VOICE.audios.get(call.peer);
+    if (!a) { a = document.createElement('audio'); a.autoplay = true; document.body.appendChild(a); VOICE.audios.set(call.peer, a); }
+    a.srcObject = s; a.muted = NET.muted.has(call.peer); a.play().catch(() => { });
+  });
+  const gone = () => { VOICE.calls.delete(call.peer); const a = VOICE.audios.get(call.peer); if (a) { a.srcObject = null; a.remove(); VOICE.audios.delete(call.peer); } };
+  call.on('close', gone); call.on('error', gone);
+}
+function voiceIncoming(call) {
+  if (!VOICE.on || !VOICE.stream || VOICE.calls.has(call.peer)) { try { call.close(); } catch (e) { } return; }
+  call.answer(VOICE.stream); voiceAttach(call);
+}
+// cada par de amigos com voz ligada abre uma chamada (quem tem o rótulo menor liga)
+function voiceSync() {
+  if (!VOICE.on || !MP.peer || !MP.room || MP.kind !== 'peer') return;
+  const me = MP.peer.id, peers = MP.room.peers();
+  for (const p of peers) {
+    if (p.peer === me || !p.presence || !p.presence.vo || VOICE.calls.has(p.peer)) continue;
+    if (me < p.peer) { try { const call = MP.peer.call(p.peer, VOICE.stream); if (call) voiceAttach(call); } catch (e) { } }
+  }
+  for (const id of [...VOICE.calls.keys()]) if (!peers.some(p => p.peer === id && p.presence && p.presence.vo)) { try { VOICE.calls.get(id).close(); } catch (e) { } }
+}
+function muteToggle(id) {
+  if (NET.muted.has(id)) NET.muted.delete(id); else NET.muted.add(id);
+  const a = VOICE.audios.get(id); if (a) a.muted = NET.muted.has(id);
+  mpRender();
+}
+
+/* ---------- Brechas (mods): mudam o jogo só no seu aparelho ----------
+   Cada um pode "quebrar" o próprio jogo (velocidade, gravidade, prancha gigante...). Os outros só veem o resultado
+   (você voando, por exemplo) e um selo "mod" no seu nome. De propósito, não existe console para colar código: assim
+   ninguém consegue te convencer a rodar algo que leia seus dados ou mande seu IP para outro lugar. */
+function modsOpen(open) {
+  const el = $('modSheet'); el.hidden = open === undefined ? !el.hidden : !open;
+  if (!el.hidden) { modsRender(); if (document.pointerLockElement) document.exitPointerLock(); }
+}
+function modsRender() {
+  const box = $('modBody'); if (!box) return;
+  box.textContent = '';
+  const p = document.createElement('p'); p.className = 'note';
+  p.textContent = 'Brechas mudam o jogo só para você. Os outros jogadores veem "mod" no seu nome e o que você faz (voando, correndo demais), mas o jogo deles continua normal.';
+  box.appendChild(p);
+  const row = (label, input) => { const l = document.createElement('label'); l.className = 'modrow'; const s = document.createElement('span'); s.textContent = label; l.append(input, s); box.appendChild(l); };
+  const chk = (key, label, after) => { const i = document.createElement('input'); i.type = 'checkbox'; i.checked = !!MODS[key]; i.addEventListener('change', () => { MODS[key] = i.checked; if (after) after(); }); row(label, i); };
+  const sp = document.createElement('input'); sp.type = 'range'; sp.min = '1'; sp.max = '3'; sp.step = '0.25'; sp.value = String(MODS.speed);
+  const out = document.createElement('output'); out.textContent = String(MODS.speed).replace('.', ',') + '×';
+  sp.addEventListener('input', () => { MODS.speed = +sp.value; out.textContent = String(MODS.speed).replace('.', ',') + '×'; });
+  const l = document.createElement('label'); l.className = 'range'; const t = document.createElement('span'); t.textContent = 'Velocidade'; l.append(t, sp, out); box.appendChild(l);
+  chk('lowGrav', 'Gravidade da Lua (pulos e aéreos)');
+  chk('noWipe', 'Nunca tomar vaca');
+  chk('bigBoard', 'Prancha gigante', () => applyBoardLook(board, CFG.board, CFG.paint));
+  chk('waterWalk', 'Andar sobre a água');
+  chk('ownWaves', 'Minhas ondas (usa os seus Ajustes mesmo sem ser o anfitrião: o mar fica diferente só para você)', () => { WCACHE.clear(); });
+}
+
+/* ---------- ? ---------- */
+const MORSE = { M: '--', O: '---', R: '.-.', T: '-' };
+function morseSeq(word) {
+  const s = [];
+  for (const ch of word) { const c = MORSE[ch] || ''; for (let i = 0; i < c.length; i++) { s.push([1, c[i] === '-' ? 3 : 1]); s.push([0, 1]); } s[s.length - 1] = [0, 3]; }
+  s.push([0, 7]); return s;
+}
+function oddInit() {
+  const g = makeChar(0xd9d6cf, 0xcfcac0);
+  const pale = new THREE.MeshStandardMaterial({ color: 0xe6e2da, roughness: 1 });
+  g.traverse(o => { if (o.isMesh) { o.material = pale; o.castShadow = false; } });
+  const Jp = g.userData.J;
+  Jp.hips.position.y = 0.28; Jp.hipL.rotation.x = -1.45; Jp.hipR.rotation.x = -1.45; Jp.knL.rotation.x = 1.55; Jp.knR.rotation.x = 1.55;
+  Jp.head.rotation.x = 0.12; Jp.shL.rotation.z = 0.12; Jp.shR.rotation.z = -0.12;
+  const b = makeBoard(); applyBoardLook(b, 'short', 'classica');
+  b.userData.mats.deck.color.setHex(0xd2cec6); b.userData.mats.stripe.color.setHex(0xa9a49a); b.userData.mats.rail.color.setHex(0x8f8a80);
+  const grp = new THREE.Group(); g.position.set(0, 0.04, -0.1); grp.add(b, g); grp.visible = false; scene.add(grp);
+  ODD.pale = grp;
+  scene.traverse(o => { if (o.isMesh && o.material && o.material.isMeshBasicMaterial && o.material.color && o.material.color.getHex() === 0xfff1b8) ODD.lamp = o.material; });
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128; const c2 = cv.getContext('2d');
+  c2.font = '700 96px Georgia, serif'; c2.textAlign = 'center'; c2.textBaseline = 'middle'; c2.fillStyle = 'rgba(64,46,30,0.6)'; c2.fillText('MORTO', 256, 66);
+  const sx = -BH + 70, sz = SHORE - 7;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(6, 1.5), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false }));
+  m.rotation.set(-Math.PI / 2, 0, 0.35); m.position.set(sx, terrainH(sx, sz) + 0.03, sz); m.renderOrder = 1; scene.add(m);
+}
+function oddRoom(code) { oddCurse(code === 'MORTO'); }
+function oddCurse(on) {
+  if (ODD.cursed === on) return;
+  ODD.cursed = on; WCACHE.clear();
+  if (on) {
+    const fogC = new THREE.Color(0x12161a);
+    skyU.uZenith.value.setHex(0x040608); skyU.uHorizon.value.setHex(0x161b20); skyU.uSunColor.value.setHex(0x2a2e33);
+    scene.fog.color.copy(fogC); scene.fog.near = 18; scene.fog.far = 200;
+    waterU.uFogColor.value.copy(fogC); waterU.uFogNear.value = 18; waterU.uFogFar.value = 200;
+    for (const mm of [water.material, farWater.material]) { mm.uniforms.uFogColor.value.copy(fogC); mm.uniforms.uFogNear.value = 18; mm.uniforms.uFogFar.value = 200; }
+    for (const mm of [water.material, farWater.material]) { mm.uniforms.uDeep.value.setHex(0x02070a); mm.uniforms.uShallow.value.setHex(0x0a2226); }
+    waterU.uDeep.value.setHex(0x02070a); waterU.uShallow.value.setHex(0x0a2226);
+    for (const cl of clouds) cl.visible = false;
+    sun.intensity = 0.12; hemi.intensity = 0.22;
+    ODD.paleOn = true; ODD.px = S.pos.x + 6; ODD.pz = S.pos.z + 16; ODD.curseT = 0; ODD.said = 0;
+  } else {
+    ODD.paleOn = false; for (const cl of clouds) cl.visible = true; applyPreset(presetKey); wxCloud = -1; applyWeather();
+  }
+}
+function oddUpdate(dt) {
+  if (!ODD.pale) return;
+  if (ODD.morseQ && ODD.lamp) {
+    ODD.morseS += dt; const [on, len] = ODD.morseQ[ODD.morseI];
+    ODD.lamp.color.setHex(on ? 0xfff1b8 : 0x1c1c1c);
+    if (ODD.morseS >= len * 0.3) { ODD.morseS = 0; if (++ODD.morseI >= ODD.morseQ.length) { ODD.morseQ = null; ODD.lamp.color.setHex(0xfff1b8); ODD.morseT = 150 + Math.random() * 240; } }
+  } else if (started && (ODD.morseT -= dt) <= 0) { ODD.morseQ = morseSeq('MORTO').concat(morseSeq('MORTO')); ODD.morseI = 0; ODD.morseS = 0; }
+  const pl = S.pos;
+  if (ODD.cursed) {
+    ODD.curseT += dt;
+    const d = Math.hypot(ODD.px - pl.x, ODD.pz - pl.z);
+    if (d > 30 || d < 9) { const a = Math.atan2(ODD.px - pl.x, ODD.pz - pl.z); ODD.px = pl.x + Math.sin(a) * 16; ODD.pz = pl.z + Math.cos(a) * 16; }
+    if (ODD.said === 0 && ODD.curseT > 25) { ODD.said = 1; feed('Surfista 0: você também está vendo ele?', true); }
+    if (ODD.said === 1 && ODD.curseT > 70) { ODD.said = 2; feed('Surfista 0: não fica de costas', true); }
+  } else if (!ODD.paleOn) {
+    ODD.paleT -= dt;
+    if (ODD.paleT <= 0) {
+      ODD.paleT = 120 + Math.random() * 200;
+      if (started && presetKey === 'dusk' && clock > 150 && (S.mode === 'paddle' || S.mode === 'ride' || S.mode === 'walk') && Math.random() < 0.4) {
+        ODD.px = clamp(pl.x + rs(90), -BH + 30, BH - 30); ODD.pz = clamp(pl.z + 140 + Math.random() * 70, 150, Z0 - 45); ODD.paleOn = true; ODD.paleLife = 50;
+      }
+    }
+  }
+  if (ODD.paleOn) {
+    const d = Math.hypot(ODD.px - pl.x, ODD.pz - pl.z);
+    if (!ODD.cursed && ((ODD.paleLife -= dt) <= 0 || d < 60)) { ODD.paleOn = false; }
+    else { ODD.pale.position.set(ODD.px, waterH(ODD.px, ODD.pz) + 0.02, ODD.pz); ODD.pale.rotation.set(0, Math.atan2(pl.x - ODD.px, pl.z - ODD.pz), 0); }
+  }
+  ODD.pale.visible = ODD.paleOn;
+  if (NET.room && ODD.ghostUntil < performance.now() && Math.random() < dt / 1100) { ODD.ghostUntil = performance.now() + 4000; renderPlayers(NET.lastPeers || []); setTimeout(() => renderPlayers(NET.lastPeers || []), 4100); }
+}
+oddInit();
 function mpNick() { let n = ''; try { n = localStorage.getItem('mare-dourada-nome') || ''; } catch (e) { } return cleanNick(n); }
 async function mpStart(host, code) {
   if (MP.state !== 'idle') return;
@@ -3672,7 +4036,8 @@ async function mpStart(host, code) {
   if (host) code = Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[(Math.random() * 32) | 0]).join('');
   MP.code = code; MP.status = host ? 'Criando sala…' : 'Procurando a sala ' + code + '…'; mpRender();
   const peer = host ? new Peer(MP_PREFIX + code, { config: { iceServers: MP_ICE } }) : new Peer({ config: { iceServers: MP_ICE } });
-  MP.peer = peer;
+  MP.peer = peer; MP.kind = 'peer';
+  peer.on('call', voiceIncoming);
   let started = false;
   const timer = setTimeout(() => { if (!started) fail('Demorou demais para conectar (15 s). Tente de novo.'); }, 15000);
   function fail(msg) { clearTimeout(timer); if (MP.room) MP.room.leave(msg); else { try { peer.destroy(); } catch (e) { } mpEnded(msg); } }
@@ -3689,11 +4054,13 @@ async function mpStart(host, code) {
     if (!host) room.onConnection(c => { if (c && !started) { started = true; clearTimeout(timer); MP.state = 'in'; MP.status = ''; mpRender(); } });
     else { MP.state = 'in'; MP.status = 'Sala criada! Passe o código para seus amigos.'; }
     attachRoom(room, false);
+    oddRoom(code);
     mpRender();
   });
 }
 function mpLeave() { if (MP.room) MP.room.leave(''); else mpEnded(''); }
 function mpEnded(msg) {
+  voiceOff(); oddCurse(false); MP.kind = null;
   MP.room = null; MP.peer = null; MP.state = 'idle'; MP.status = msg || ''; MP.code = '';
   NET.room = null; NET.on = false; NET.isHost = true; NET.hostCfg = null; NET.hostPeer = null; NET.offSamples.length = 0; NET.joinedAt = Date.now();
   for (const p of [...NET.avatars.keys()]) dropAvatar(p);
@@ -3709,32 +4076,63 @@ function mpOpen(open) {
 function mpRender() {
   const box = $('mpBody'); if (!box) return;
   box.textContent = '';
-  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; box.appendChild(e); return e; };
-  const btn = (txt, fn, cls) => { const b = el('button', cls || '', txt); b.type = 'button'; b.addEventListener('click', fn); return b; };
-  if (MP.state === 'in' && MP.room) {
-    el('p', 'note', 'Código da sala');
+  const el = (tag, cls, txt, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; (parent || box).appendChild(e); return e; };
+  const btn = (txt, fn, cls, parent) => { const b = el('button', cls || '', txt, parent); b.type = 'button'; b.addEventListener('click', fn); return b; };
+  const copy = (txt, done) => { try { navigator.clipboard.writeText(txt).then(() => { MP.status = done; mpRender(); }, () => { MP.status = txt; mpRender(); }); } catch (e) { MP.status = txt; mpRender(); } };
+  const playersList = peers => {
+    const ul = el('ul', 'mplist');
+    for (const p of peers) {
+      if (p.kind && p.kind !== 'viewer') continue;
+      const me = p.isMe && p.sameTab, pr = p.presence || {};
+      const li = el('li', '', undefined, ul);
+      el('span', '', (me ? 'Você' : peerName(p)) + (pr.ja === 0 ? ' ★' : '') + (pr.md ? ' · mod' : '') + (pr.vo ? ' · voz' : ''), li);
+      if (!me) btn(NET.muted.has(p.peer) ? 'Ouvir' : 'Silenciar', () => muteToggle(p.peer), 'mini', li);
+    }
+  };
+  if (NET.via === 'claude' && NET.room) {
+    el('p', 'note', 'Você está na sala do claude.ai: todo mundo que abriu este link (logado) está na mesma praia. Chat de texto: aperte Enter.');
+    el('p', 'note', 'Salas públicas e chat de voz só no site do jogo e nos apps.');
+    playersList(NET.lastPeers || NET.room.peers());
+  } else if (MP.state === 'in' && MP.room) {
+    const pub = MP.kind === 'pub';
+    el('p', 'note', pub ? 'Sala pública: qualquer um que souber o código (ou achar na lista de salas abertas) entra.' : 'Código da sala (só entra quem tiver)');
     el('div', 'mpcode', MP.code);
     const row = el('div', 'mprow');
-    const copy = (txt, done) => { try { navigator.clipboard.writeText(txt).then(() => { MP.status = done; mpRender(); }, () => { MP.status = txt; mpRender(); }); } catch (e) { MP.status = txt; mpRender(); } };
-    const b1 = btn('Copiar código', () => copy(MP.code, 'Código copiado.')); row.appendChild(b1);
-    if (/^https?:/.test(location.protocol)) { const b2 = btn('Copiar convite', () => copy(location.origin + location.pathname + '?sala=' + MP.code, 'Convite copiado: quem abrir o link já cai na tela de entrar.')); row.appendChild(b2); }
+    btn('Copiar código', () => copy(MP.code, 'Código copiado.'), '', row);
+    if (/^https?:/.test(location.protocol)) btn('Copiar convite', () => copy(location.origin + location.pathname + (pub ? '?publica=' : '?sala=') + MP.code, 'Convite copiado: quem abrir o link já cai na tela de entrar.'), '', row);
     const peers = MP.room.peers();
-    el('p', 'note', 'Surfistas na sala (' + peers.length + '/' + MP_MAX + '):');
-    const ul = el('ul', 'mplist');
-    for (const p of peers) { const li = document.createElement('li'); li.textContent = (p.isMe ? 'Você' : cleanNick(p.presence && p.presence.nm) || 'Surfista') + (p.presence && p.presence.ja === 0 ? ' ★ criou a sala' : ''); ul.appendChild(li); }
-    el('p', 'note', 'Quem criou a sala escolhe o tamanho e os tipos de onda para todos. Se quem criou sair, a sala acaba.');
+    el('p', 'note', 'Surfistas na sala (' + peers.length + '/' + (pub ? MQ_MAX : MP_MAX) + '):');
+    playersList(peers);
+    if (!pub) {
+      btn(VOICE.on ? 'Desligar a voz' : 'Ligar a voz (segure V para falar)', voiceToggle);
+      el('p', 'note', 'A voz liga os aparelhos direto: os amigos da sala veem o IP uns dos outros. Use só com quem você conhece.');
+    } else el('p', 'note', 'Sala pública não tem voz: aqui tudo passa pelo servidor de mensagens e ninguém vê o IP de ninguém.');
+    el('p', 'note', 'Chat de texto: Enter. Quem entrou primeiro (★) escolhe o tamanho e os tipos de onda para todos.');
     btn('Sair da sala', mpLeave, 'ghost');
   } else if (MP.state === 'connecting') {
     el('p', 'note', 'Conectando…');
   } else {
-    el('p', 'note', 'Jogue com amigos pela internet, no PC ou no celular, sem VPN: quem cria a sala passa o código e os outros entram com ele.');
     const lab = el('label', 'mplabel', 'Seu nome');
     const inp = document.createElement('input'); inp.type = 'text'; inp.id = 'mpName'; inp.maxLength = 12; inp.placeholder = 'Surfista'; inp.value = NET.nick || mpNick(); lab.appendChild(inp);
+    el('h3', '', 'Sala pública');
+    el('p', 'note', 'Como no Gorilla Tag: você cai numa sala aberta com quem estiver jogando. Tudo passa por um servidor de mensagens, então ninguém vê o IP de ninguém. Tem chat de texto, sem voz.');
+    btn('Entrar numa sala pública', () => mpPublic(''));
+    const rowp = el('div', 'mprow');
+    const pc = document.createElement('input'); pc.type = 'text'; pc.id = 'mpPub'; pc.maxLength = 8; pc.placeholder = 'CÓDIGO PÚBLICO'; pc.value = MP.prefillPub || ''; pc.style.textTransform = 'uppercase'; rowp.appendChild(pc);
+    pc.addEventListener('keydown', e => { if (e.key === 'Enter') mpPublic(pc.value); });
+    btn('Entrar', () => mpPublic(pc.value), '', rowp);
+    btn('Ver salas abertas', mpBrowse, 'ghost');
+    if (MP.list && MP.list.length) {
+      const ul = el('ul', 'mplist');
+      for (const r of MP.list) { const li = el('li', '', undefined, ul); el('span', '', r.code + ' · ' + r.n + (r.n === 1 ? ' surfista' : ' surfistas') + (r.v && r.v !== GAME_VERSION ? ' · versão ' + r.v : ''), li); btn('Entrar', () => mpPublic(r.code), 'mini', li); }
+    }
+    el('h3', '', 'Sala com amigos');
+    el('p', 'note', 'Quem cria passa o código e os outros entram com ele. Tem chat de voz.');
     btn('Criar sala', () => mpStart(true));
     const row = el('div', 'mprow');
     const ci = document.createElement('input'); ci.type = 'text'; ci.id = 'mpCode'; ci.maxLength = 6; ci.placeholder = 'CÓDIGO'; ci.value = MP.prefill || ''; ci.style.textTransform = 'uppercase'; row.appendChild(ci);
     ci.addEventListener('keydown', e => { if (e.key === 'Enter') mpStart(false, ci.value); });
-    const b = btn('Entrar', () => mpStart(false, ci.value)); row.appendChild(b);
+    btn('Entrar', () => mpStart(false, ci.value), '', row);
   }
   if (MP.status) el('p', 'mpstatus', MP.status);
 }
@@ -3749,7 +4147,7 @@ function mpRender() {
    - O endereço do site leva "&t=hora" para o app não reaproveitar a página guardada (até 10 min velha).
    - Se sair um app novo (APK/EXE), aparece um aviso com o link da release.
    A versão e de onde o jogo está rodando aparecem no menu de Configurações. */
-const GAME_VERSION = '1.2.1';
+const GAME_VERSION = '1.3.0';
 const APP_SITE = 'https://heitorcoser.github.io/mare-dourada/';
 const APP_INFO = { version: GAME_VERSION, where: 'site' };
 function showVersion() { const el = document.getElementById('verInfo'); if (el) el.textContent = 'Versão ' + APP_INFO.version + ' · ' + APP_INFO.where; }
