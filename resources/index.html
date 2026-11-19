@@ -92,6 +92,18 @@ canvas#c{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
 .sheet button.mini{padding:3px 9px;font-size:11.5px;flex:none}
 .modrow{display:flex;gap:10px;align-items:center;font-size:14px;padding:5px 2px;cursor:pointer}
 .modrow input{width:18px;height:18px;accent-color:var(--coral);flex:none}
+#replayBar{pointer-events:auto;top:calc(14px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);width:min(92vw,460px);display:flex;flex-direction:column;gap:6px;z-index:9}
+#replayBar .rb-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:13px;color:var(--sand)}
+#replayBar .rb-top b{font-family:var(--display);font-weight:400;font-size:18px;letter-spacing:.08em;color:#ff4d6d}
+#replayBar .rb-track{height:5px;border-radius:999px;background:rgba(251,246,236,.18);overflow:hidden}
+#replayBar #rbFill{height:100%;width:0;background:var(--sea)}
+#replayBar .rb-keys{font-size:11.5px;opacity:.8}
+#replayBar .rb-btns{display:flex;gap:6px}
+#replayBar .rb-btns button{flex:1;min-height:34px;border-radius:10px;border:1px solid rgba(251,246,236,.3);background:rgba(251,246,236,.1);color:var(--sand);font:inherit;font-size:13px;cursor:pointer}
+#replayBar .rb-btns button[aria-pressed=true]{background:var(--sea);color:#06222b;border-color:var(--sea)}
+@media (pointer:coarse){#replayBar .rb-keys{display:none}}
+.replaying #hint,.replaying #wave,.replaying #pops{visibility:hidden}
+#bReplay{background:#ff4d6d!important;color:#fff!important;border-color:#ff4d6d!important}
 #pops{top:30%;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px}
 .pop{font-family:var(--display);font-size:clamp(22px,4vw,40px);color:#ffd166;text-shadow:0 3px 0 rgba(15,34,48,.6),0 0 24px rgba(255,122,89,.5);animation:pop 1.7s ease-out forwards;white-space:nowrap}
 .pop small{display:block;text-align:center;font-family:var(--body);font-size:15px;font-weight:700;color:var(--foam);letter-spacing:.1em}
@@ -178,6 +190,8 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div class="tools">
       <button id="bMenu" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="menu"><span aria-hidden="true">⚙ </span>Configurações</button>
       <button id="bBoard" type="button">Prancha (B)</button>
+      <button id="bPeak" type="button">Pico (G)</button>
+      <button id="bReplay" type="button" hidden>Replay (Q)</button>
     </div>
     <div id="menu" class="panel" role="menu" hidden>
       <button id="bTime" type="button" role="menuitem">Meio-dia (T)</button>
@@ -207,11 +221,13 @@ html,body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;us
     <div><kbd>B</kbd> prancha, pinturas e desafios</div>
     <div><kbd>Enter</kbd> chat · segure <kbd>V</kbd> para falar (sala com amigos)</div>
     <div><kbd>F8</kbd> brechas (mods só no seu jogo)</div>
+    <div><kbd>G</kbd> ir para o pico da próxima onda · <kbd>Q</kbd> replay da última onda</div>
     <div><kbd>R</kbd> voltar para a areia</div>
   </div>
 
   <div id="pops" class="hud"></div>
   <div id="feed" class="hud" aria-live="polite"></div>
+  <div id="replayBar" class="hud panel" hidden><div class="rb-top"><b>REPLAY</b><span id="rbInfo"></span></div><div class="rb-track"><div id="rbFill"></div></div><div class="rb-keys">Esc ou Q sai · segure Shift: câmera lenta · C troca a câmera</div><div class="rb-btns"><button id="rbCam" type="button">Câmera</button><button id="rbSlow" type="button" aria-pressed="false">Lenta</button><button id="rbExit" type="button">Sair</button></div></div>
   <div id="chatBox" class="hud" hidden><input id="chatIn" type="text" maxlength="120" autocomplete="off" placeholder="Mensagem · Enter manda · Esc fecha" aria-label="Mensagem do chat"></div>
   <div id="wave" class="hud"></div>
   <div id="hint" class="hud"></div>
@@ -1944,7 +1960,7 @@ const crouchKey = () => !!(keys.ControlLeft || keys.ControlRight || keys.KeyC);
 /* Tela cheia com trava de teclado (Keyboard Lock). Numa página comum NENHUM site consegue impedir o Ctrl+W de
    fechar a aba. Em tela cheia o Chrome e o Edge deixam o jogo ficar com essas teclas: Ctrl+W vira "agachar + remar".
    O Esc fica de fora da trava, então ele continua saindo da tela cheia normalmente. */
-const LOCK_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'KeyR', 'KeyT', 'KeyN', 'KeyC', 'KeyB', 'KeyP', 'KeyO', 'KeyH', 'KeyM', 'KeyF', 'Space'];
+const LOCK_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyQ', 'KeyG', 'KeyR', 'KeyT', 'KeyN', 'KeyC', 'KeyB', 'KeyP', 'KeyO', 'KeyH', 'KeyM', 'KeyF', 'Space'];
 let kbLocked = false, ctrlWarned = false;
 function goFullscreen(on = true) {
   const el = document.documentElement;
@@ -2247,6 +2263,7 @@ function startRide() {
   S.ride = newRide();
   if (S.proneRide) { S.ride.time = 0.5; hero.quaternion.copy(Q_PRONE); hero.position.set(0, 0.15, -0.5); }   // deitado: sem levantar
   S.carveT = 0; S.lostT = 0; S.tubeT = 0; S.turn = null; S.pumpPh = 0; S.floatT = 0;
+  recRideStart();
   if (late) award(S.ride, 'Drop atrasado!', 250);
   else pop('Dropou!');
   splashSound(0.5);
@@ -2266,6 +2283,7 @@ function endRide(reason) {
   }
   if (pts > S.best) { S.best = pts; try { localStorage.setItem('mare-dourada-best', String(pts)); } catch (e) { } if (pts > 200) pop('Melhor onda!', fmt(pts) + ' pontos'); }
   else if (reason !== 'wipe') pop('+' + fmt(pts), reason === 'skim' ? 'skim' : reason === 'shore' ? 'até a beira' : reason === 'kick' ? 'saiu da onda' : 'a onda passou');
+  recRideEnd(r, reason);
   S.ride = null;
 }
 // kind: 'lip' (o lábio caiu em cima), 'close' (tubo/onda fechou), 'foam' (espuma), 'rail' (rabeta), 'nose' (bico enterrou), 'air'
@@ -2528,12 +2546,13 @@ function frame(now) {
 function runFrame(dt) {
   if (!(dt > 1e-4)) dt = 1e-4;   // dois quadros com o mesmo horário davam dt = 0 e a curva dividia por zero (velocidade NaN)
   clock += dt;
-  if (!window.__mareFreeze) T = seaTime(); updateEnv(); updateWaves(); updateLevel(dt); updateWet(dt); swashFx(dt);
+  if (REPLAY.on) T = replayT(); else if (!window.__mareFreeze) T = seaTime(); updateEnv(); updateWaves(); updateLevel(dt); updateWet(dt); swashFx(dt);
   waterU.uLevel.value = LEVEL; waterU.uEnv.value.set(ENV.wind, ENV.chop, ENV.cloud, ENV.rain); waterU.uEnv2.value.set(ENV.sea, ENV.storm, 0, 0);
   applyWeather(); updateRain(dt);
   water.material.uniforms.uTime.value = T; farWater.material.uniforms.uTime.value = T;
   updateLips();
-  if (started) step(dt); else idleCam(dt);
+  if (REPLAY.on) replayStep(dt); else if (started) step(dt); else idleCam(dt);
+  recUpdate(dt);
   lipSpray(dt);
   updateSpray(dt);
   for (const g of gulls) {
@@ -2581,6 +2600,8 @@ function step(dt) {
   if (take('Escape')) { openSettings(false); mpOpen(false); boardOpen(false); menuOpen(false); modsOpen(false); }
   if (take('Enter') || take('NumpadEnter')) chatOpen();
   if (take('F8')) modsOpen();
+  if (take('KeyG')) goPeak();
+  if (take('KeyQ')) { if (REC.ready) replayStart(); else pop('Ainda não tem replay', 'pegue uma onda primeiro'); }
   voiceTalk(!!keys.KeyV);
   if (S.mode !== 'ride') S.tubeCam = lerp(S.tubeCam || 0, 0, 1 - Math.exp(-3 * dt));
   if (lastCrash > 0.6) shakeT = Math.max(shakeT, clamp(lastCrash - 0.6, 0, 1) * 0.3);
@@ -3704,6 +3725,146 @@ function makePeerRoom(peer, isHost, code, onEnd) {
   peer.on('disconnected', () => { if (!dead) { try { peer.reconnect(); } catch (e) { } } });
   return room;
 }
+
+/* ---------- Replay ----------
+   O jogo grava o tempo todo os últimos 60 s (30 vezes por segundo): onde estavam você e a prancha, a pose do
+   boneco e o tempo do mar. Como as ondas são uma conta do tempo, o replay mostra o MESMO mar daquele momento.
+   Quando uma onda termina aparece "Replay (Q)". Câmeras de cinema se revezam; segure Shift para câmera lenta, C troca
+   a câmera, Esc ou Q sai. Enquanto isso o seu surfista de verdade fica parado onde estava. */
+const REC_HZ = 30, REC_MAX = 60 * REC_HZ;
+const REC = { buf: [], acc: 0, rideStart: null, pending: null, ready: null, offerT: 0 };
+const REPLAY = { on: false, seg: null, t: 0, dur: 0, idx: 0, shot: 0, shotT: 0, manual: false, actor: null, cut: true };
+const SHOT_NAMES = ['atrás', 'do canal', 'de lado', 'drone'];
+const _rpq1 = new THREE.Quaternion(), _rpq2 = new THREE.Quaternion(), _rpv1 = new V3(), _rpv2 = new V3();
+function recFrame() {
+  hero.updateMatrixWorld(true); board.updateMatrixWorld(true);
+  const j = new Float32Array(44); let i = 0;
+  for (const jt of JL()) { const q = jt.quaternion; j[i++] = q.x; j[i++] = q.y; j[i++] = q.z; j[i++] = q.w; }
+  REC.buf.push({ c: clock, T, hp: hero.getWorldPosition(new V3()), hq: hero.getWorldQuaternion(new THREE.Quaternion()),
+    bp: board.getWorldPosition(new V3()), bq: board.getWorldQuaternion(new THREE.Quaternion()), bs: board.getWorldScale(new V3()), j, hy: J.hips.position.y });
+  if (REC.buf.length > REC_MAX) REC.buf.shift();
+}
+function recUpdate(dt) {
+  if (!started || REPLAY.on) return;
+  REC.acc += dt;
+  if (REC.acc >= 1 / REC_HZ) { REC.acc %= 1 / REC_HZ; recFrame(); }
+  if (REC.pending && clock >= REC.pending.b) { REC.ready = REC.pending; REC.pending = null; replayOffer(); }
+}
+function recRideStart() { REC.rideStart = clock; }
+function recRideEnd(r, reason) {
+  if (REC.rideStart === null || !r || r.time < 2 || r.skim) { REC.rideStart = null; return; }
+  // 2,5 s antes do drop até 2 s depois do fim (3,5 s se foi vaca, para ver o caldo)
+  REC.pending = { a: REC.rideStart - 2.5, b: clock + (reason === 'wipe' ? 3.5 : 2), pts: Math.round(r.pts), reason };
+  REC.rideStart = null;
+}
+function replayOffer() {
+  const b = $('bReplay'); b.hidden = false;
+  clearTimeout(REC.offerT); REC.offerT = setTimeout(() => { b.hidden = true; }, 15000);
+  pop('Replay da onda: aperte Q', 'ou o botão Replay');
+}
+function replayMakeActor() {
+  const h = makeChar(), b = makeBoard();
+  h.visible = b.visible = false; scene.add(h); scene.add(b);
+  REPLAY.actor = { h, b, J: h.userData.J };
+}
+function replayStart() {
+  const sg = REC.ready; if (!sg || REPLAY.on) return;
+  const frames = REC.buf.filter(f => f.c >= sg.a && f.c <= sg.b);
+  if (frames.length < 15) { pop('Replay indisponível', 'essa onda já saiu da gravação (60 s)'); return; }
+  if (!REPLAY.actor) replayMakeActor();
+  applyBoardLook(REPLAY.actor.b, CFG.board, CFG.paint);
+  Object.assign(REPLAY, { camTap: false, slowTap: false, seg: frames, t: 0, idx: 0, dur: frames[frames.length - 1].c - frames[0].c, shot: 0, shotT: 0, manual: false, cut: true, on: true });
+  hero.visible = false; board.visible = false;
+  for (const av of NET.avatars.values()) { av.h.visible = av.b.visible = av.tag.visible = false; }
+  REPLAY.actor.h.visible = REPLAY.actor.b.visible = true;
+  $('rbSlow').setAttribute('aria-pressed', 'false'); $('bReplay').hidden = true; $('replayBar').hidden = false; $('app').classList.add('replaying');
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+function replayStop() {
+  REPLAY.on = false; REPLAY.seg = null;
+  hero.visible = true; board.visible = true;
+  for (const av of NET.avatars.values()) { av.h.visible = av.b.visible = av.tag.visible = true; }
+  if (REPLAY.actor) REPLAY.actor.h.visible = REPLAY.actor.b.visible = false;
+  $('replayBar').hidden = true; $('app').classList.remove('replaying');
+  for (const k in pressed) pressed[k] = false;
+}
+function replayFrameAt(t) {
+  const fr = REPLAY.seg, c0 = fr[0].c + t;
+  let i = REPLAY.idx; if (fr[i].c > c0) i = 0;
+  while (i < fr.length - 2 && fr[i + 1].c <= c0) i++;
+  REPLAY.idx = i;
+  const a = fr[i], b = fr[Math.min(i + 1, fr.length - 1)];
+  return { a, b, k: b.c > a.c ? clamp((c0 - a.c) / (b.c - a.c), 0, 1) : 0 };
+}
+function replayT() { const { a, b, k } = replayFrameAt(REPLAY.t); return lerp(a.T, b.T, k); }
+function replayStep(dt) {
+  if (take('Escape') || take('KeyQ')) { replayStop(); return; }
+  if (take('KeyC') || REPLAY.camTap) { REPLAY.camTap = false; REPLAY.manual = true; REPLAY.shot = (REPLAY.shot + 1) % SHOT_NAMES.length; REPLAY.shotT = 0; REPLAY.cut = true; }
+  const slow = keys.ShiftLeft || keys.ShiftRight || REPLAY.slowTap;
+  REPLAY.t += dt * (slow ? 0.35 : 1);
+  if (REPLAY.t >= REPLAY.dur) { replayStop(); pop('Fim do replay'); return; }
+  const { a, b, k } = replayFrameAt(REPLAY.t), A = REPLAY.actor;
+  A.h.position.lerpVectors(a.hp, b.hp, k); A.h.quaternion.copy(a.hq).slerp(b.hq, k);
+  A.b.position.lerpVectors(a.bp, b.bp, k); A.b.quaternion.copy(a.bq).slerp(b.bq, k); A.b.scale.copy(a.bs);
+  const JLs = [A.J.hips, A.J.spine, A.J.head, A.J.shL, A.J.elL, A.J.shR, A.J.elR, A.J.hipL, A.J.knL, A.J.hipR, A.J.knR];
+  for (let i = 0; i < JLs.length; i++) {
+    _rpq1.set(a.j[i * 4], a.j[i * 4 + 1], a.j[i * 4 + 2], a.j[i * 4 + 3]);
+    _rpq2.set(b.j[i * 4], b.j[i * 4 + 1], b.j[i * 4 + 2], b.j[i * 4 + 3]);
+    JLs[i].quaternion.copy(_rpq1).slerp(_rpq2, k);
+  }
+  A.J.hips.position.set(0, lerp(a.hy, b.hy, k), 0);
+  // câmera: direção do movimento suavizada (0,4 s para trás e para a frente)
+  const fr = REPLAY.seg, fa = fr[Math.max(REPLAY.idx - 6, 0)], fb = fr[Math.min(REPLAY.idx + 6, fr.length - 1)];
+  let dx = fb.hp.x - fa.hp.x, dz = fb.hp.z - fa.hp.z; const dl = Math.hypot(dx, dz);
+  if (dl > 0.3) { dx /= dl; dz /= dl; } else { dx = 0; dz = -1; }
+  if (!REPLAY.manual && (REPLAY.shotT += dt) > 3.6) { REPLAY.shotT = 0; REPLAY.shot = (REPLAY.shot + 1) % SHOT_NAMES.length; REPLAY.cut = true; }
+  const pos = A.h.position;
+  let px = -dz, pz = dx; if (pz > 0) { px = -px; pz = -pz; }      // lado da praia (a onda fica atrás)
+  const want = _rpv1;
+  if (REPLAY.shot === 0) want.set(pos.x - dx * 7, pos.y + 2.6, pos.z - dz * 7);
+  else if (REPLAY.shot === 1) want.set(pos.x + dx * 6, pos.y + 1.6, pos.z - 13);
+  else if (REPLAY.shot === 2) want.set(pos.x + px * 9, pos.y + 0.9, pos.z + pz * 9);
+  else want.set(pos.x - dx * 10, pos.y + 12, pos.z - dz * 10 - 6);
+  if (REPLAY.cut) { camera.position.copy(want); REPLAY.cut = false; } else camera.position.lerp(want, 1 - Math.exp(-3 * dt));
+  keepCamAboveWater();
+  camera.lookAt(_rpv2.set(pos.x, pos.y + 1.1, pos.z));
+  if (Math.abs(camera.fov - 58) > 0.05) { camera.fov = lerp(camera.fov, 58, 1 - Math.exp(-4 * dt)); camera.updateProjectionMatrix(); }
+  placeSun(pos);
+  const f1 = v => v.toFixed(1).replace('.', ',');
+  const info = f1(REPLAY.t) + ' de ' + f1(REPLAY.dur) + ' s · câmera ' + SHOT_NAMES[REPLAY.shot] + (slow ? ' · câmera lenta' : '');
+  if ($('rbInfo').textContent !== info) $('rbInfo').textContent = info;
+  $('rbFill').style.width = (100 * REPLAY.t / REPLAY.dur).toFixed(1) + '%';
+}
+
+/* ---------- Ir para o pico (G) ----------
+   Leva você, deitado na prancha, para logo além de onde a próxima onda vai quebrar, de frente para a areia: é só
+   remar (W) quando ela chegar e ficar de pé (Espaço). Espera de 8 s entre um uso e outro. */
+let peakCool = 0;
+function goPeak() {
+  if (REPLAY.on || !started) return;
+  if (!(S.mode === 'walk' || S.mode === 'paddle')) { pop('Agora não', 'só andando ou remando'); return; }
+  if (clock < peakCool) { pop('Espere um pouco', Math.ceil(peakCool - clock) + ' s para ir de novo'); return; }
+  // a próxima onda que ainda não quebrou, com pelo menos 4 s para você se ajeitar
+  let best = null;
+  for (const w of W) { if (w.reform || w.type === 'beira' || w.type === 'surgente') continue; if (-w.e > 4 && (!best || w.e > best.e)) best = w; }
+  if (!best) best = W.reduce((b, w) => (!b || w.e < b.e) ? w : b, null);   // todas já quebraram: espera a mais nova
+  const x = clamp(best.x0 + (best.mode === 2 ? best.dir * 8 : 0), -BH + 20, BH - 20);
+  const z = clamp(best.zBreak + 10, 40, Z0 - 25);
+  S.hasBoard = true; S.pos.set(x, 0, z); S.vx = S.vz = 0; S.speed = 0; S.wx = S.wz = 0; S.duck = null;
+  S.heading = Math.PI; S.facing = Math.PI;                            // de frente para a areia
+  enterPaddle(false);
+  rig.quaternion.setFromEuler(new THREE.Euler(0, Math.PI, 0));
+  camYaw = Math.PI; lastLook = -10;
+  camera.position.set(x, waterH(x, z + 8) + 3, z + 8);
+  peakCool = clock + 8;
+  const tb = Math.max(0, Math.round(-best.e));
+  pop('No pico!', (WTYPES[best.type] ? WTYPES[best.type].name : 'Onda') + (tb ? ' · quebra em ' + tb + ' s' : '') + ' · reme com W');
+}
+$('bPeak').addEventListener('click', goPeak);
+$('bReplay').addEventListener('click', replayStart);
+$('rbCam').addEventListener('click', () => { REPLAY.camTap = true; });
+$('rbSlow').addEventListener('click', () => { REPLAY.slowTap = !REPLAY.slowTap; $('rbSlow').setAttribute('aria-pressed', REPLAY.slowTap); });
+$('rbExit').addEventListener('click', () => { if (REPLAY.on) replayStop(); });
 const MP = { state: 'idle', status: '', code: '', peer: null, kind: null, list: null };
 /* ---------- Salas públicas (servidor de mensagens) ----------
    Como no Gorilla Tag: qualquer um entra numa sala aberta. O estado de cada surfista e o chat passam por um
@@ -4147,7 +4308,7 @@ function mpRender() {
    - O endereço do site leva "&t=hora" para o app não reaproveitar a página guardada (até 10 min velha).
    - Se sair um app novo (APK/EXE), aparece um aviso com o link da release.
    A versão e de onde o jogo está rodando aparecem no menu de Configurações. */
-const GAME_VERSION = '1.3.0';
+const GAME_VERSION = '1.4.0';
 const APP_SITE = 'https://heitorcoser.github.io/mare-dourada/';
 const APP_INFO = { version: GAME_VERSION, where: 'site' };
 function showVersion() { const el = document.getElementById('verInfo'); if (el) el.textContent = 'Versão ' + APP_INFO.version + ' · ' + APP_INFO.where; }

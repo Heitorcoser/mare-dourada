@@ -63,6 +63,8 @@ Mods que mudam o jogo **só no seu aparelho**: velocidade, gravidade da Lua, nun
 | V (segurar) | falar no chat de voz (sala com amigos) |
 | F8 | brechas (mods só no seu jogo) |
 | R | voltar para a areia |
+| G | ir para o pico: deitado na prancha, logo além de onde a próxima onda vai quebrar |
+| Q | replay da última onda (Shift: câmera lenta · C: troca a câmera · Esc ou Q: sai) |
 
 ## O que tem
 
@@ -76,6 +78,8 @@ Mods que mudam o jogo **só no seu aparelho**: velocidade, gravidade da Lua, nun
 - O lábio é o topo da própria onda: a parede do tubo nasce na face, é arremessado em queda livre (tempo ≈ √(2H/g)) e desaba em espuma quando bate na água.
 - Vaca com mini ragdoll: o corpo solto (juntas bola-e-soquete) é levado pela água, com empuxo, arrasto, espuma empurrando para a praia e o redemoinho da água branca. A prancha fica presa na cordinha.
 - Duck dive para furar a espuma e o lábio quando você rema para o fundo.
+- Replay de cada onda com câmeras de cinema (atrás, do canal, de lado e drone) e câmera lenta. O mar do replay é o mesmo daquele momento, porque as ondas são uma conta do tempo.
+- Botão **Pico (G)** que leva você direto para onde a próxima onda vai quebrar.
 - Regras de tubo justas: dá para estolar lá dentro; a vaca só vem se o lábio cair em você ou se o tubo desabar com você dentro.
 - Câmera que nunca entra embaixo d'água e maré contínua, sem saltos.
 - Multiplayer online sem VPN, no site, no `.exe` e no claude.ai: todo mundo na mesma praia e no mesmo mar, com placar e avisos das manobras e vacas dos outros.
